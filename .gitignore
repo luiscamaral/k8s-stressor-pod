@@ -1,0 +1,10 @@
+# Local files
+.history
+.DS_Store
+*.log
+*.tmp
+.windsurf/
+.codeium/
+.cascade/
+generated/
+
