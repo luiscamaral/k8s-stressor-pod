@@ -13,12 +13,12 @@ Build the foundation: project structure, data models, and a fully functional RES
 
 ### Success Criteria
 
-- [ ] All API endpoints return correct responses
-- [ ] Configuration updates persist in state
-- [ ] Unit tests pass (100% coverage on config/state)
-- [ ] Integration tests pass (API contract)
-- [ ] Docker image builds and runs locally
-- [ ] Health check responds correctly
+- [x] All API endpoints return correct responses
+- [x] Configuration updates persist in state
+- [x] Unit tests pass (100% coverage on config/state)
+- [x] Integration tests pass (API contract)
+- [x] Docker image builds and runs locally
+- [x] Health check responds correctly
 
 ---
 
@@ -1082,13 +1082,14 @@ chmod +x scripts/test-phase1.sh
 
 ## Phase 1 Completion Checklist
 
-- [ ] `cargo build` succeeds
-- [ ] `cargo test` passes all tests
-- [ ] `docker build -t k8s-stressor:0.1.0 .` succeeds
-- [ ] `docker run` starts container
-- [ ] `scripts/test-phase1.sh` passes all 9 tests
-- [ ] Health check responds with "OK"
-- [ ] Config validation rejects invalid values
+- [x] `cargo build` succeeds
+- [x] `cargo test` passes all tests (11 unit tests)
+- [x] `docker build -t k8s-stressor:0.1.0 .` succeeds
+- [x] `docker run` starts container
+- [x] `scripts/test-phase1.sh` passes all 15 tests
+- [x] Health check responds with "OK"
+- [x] Config validation rejects invalid values
+- [x] Swagger UI available at `/swagger-ui/`
 
 ---
 
