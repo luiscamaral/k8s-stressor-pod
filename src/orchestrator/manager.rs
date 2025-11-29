@@ -83,21 +83,12 @@ impl Orchestrator {
                         drop(state); // Release lock before spawning
 
                         // Stop existing engine
-                        active_engine = match active_engine {
-                            ActiveEngine::Cpu(handle) => {
-                                handle.stop();
-                                ActiveEngine::None
-                            }
-                            ActiveEngine::Memory(handle) => {
-                                handle.stop();
-                                ActiveEngine::None
-                            }
-                            ActiveEngine::Network(handle) => {
-                                handle.stop();
-                                ActiveEngine::None
-                            }
-                            ActiveEngine::None => ActiveEngine::None,
-                        };
+                        match active_engine {
+                            ActiveEngine::Cpu(handle) => handle.stop(),
+                            ActiveEngine::Memory(handle) => handle.stop(),
+                            ActiveEngine::Network(handle) => handle.stop(),
+                            ActiveEngine::None => {}
+                        }
 
                         // Reset metrics
                         self.reset_metrics();
