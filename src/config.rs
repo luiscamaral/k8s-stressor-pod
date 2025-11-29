@@ -41,6 +41,7 @@ pub enum CurveMode {
 /// Cycle: ramp up → hold at max (until midpoint) → ramp down → rest at start_value for interval.
 /// Cycles repeat until stopped via API.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(default)]
 pub struct CpuConfig {
     /// Curve type: linear, burst, or s-curve
     #[schema(default = "linear")]
@@ -119,6 +120,7 @@ impl CpuConfig {
 /// Follows the same curve behavior as CPU: ramp up → hold at max → ramp down → rest.
 /// Memory allocation grows/shrinks following the selected curve mode.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(default)]
 pub struct MemoryConfig {
     /// Curve type: linear, burst, or s-curve. Default: linear
     #[schema(default = "linear")]
@@ -188,6 +190,7 @@ impl MemoryConfig {
 /// Network stressor floods connections to target endpoint.
 /// Uses midpoint for active duration, then rests for interval.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(default)]
 pub struct NetworkConfig {
     /// Target endpoint URL. Default: http://localhost:8080/health
     #[schema(default = "http://localhost:8080/health")]

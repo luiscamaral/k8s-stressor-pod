@@ -178,7 +178,16 @@ pub async fn set_mode(
     post,
     path = "/cpu",
     tag = "Configuration",
-    request_body = CpuConfig,
+    request_body(content = CpuConfig, description = "CPU stressor settings", 
+        example = json!({
+            "mode": "linear",
+            "max_value": 1000,
+            "start_value": 100,
+            "growth_rate": 100,
+            "midpoint_ms": 30000,
+            "interval": 10
+        })
+    ),
     responses(
         (status = 200, description = "CPU configuration updated"),
         (status = 400, description = "Invalid configuration")
@@ -202,7 +211,16 @@ pub async fn set_cpu_config(
     post,
     path = "/memory",
     tag = "Configuration",
-    request_body = MemoryConfig,
+    request_body(content = MemoryConfig, description = "Memory stressor settings",
+        example = json!({
+            "mode": "linear",
+            "target_mb": 256,
+            "start_mb": 0,
+            "growth_rate": 10,
+            "midpoint_ms": 30000,
+            "interval": 10
+        })
+    ),
     responses(
         (status = 200, description = "Memory configuration updated"),
         (status = 400, description = "Invalid configuration")
@@ -226,7 +244,15 @@ pub async fn set_memory_config(
     post,
     path = "/network",
     tag = "Configuration",
-    request_body = NetworkConfig,
+    request_body(content = NetworkConfig, description = "Network stressor settings",
+        example = json!({
+            "endpoint": "http://localhost:8080/health",
+            "protocol": "http",
+            "connections": 10,
+            "midpoint_ms": 30000,
+            "interval": 10
+        })
+    ),
     responses(
         (status = 200, description = "Network configuration updated"),
         (status = 400, description = "Invalid configuration")
