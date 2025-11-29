@@ -21,7 +21,7 @@ RUN mkdir -p src/api && \
 
 # Build application
 COPY src ./src
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs src/lib.rs && cargo build --release
 
 # Runtime stage
 FROM debian:bookworm-slim
