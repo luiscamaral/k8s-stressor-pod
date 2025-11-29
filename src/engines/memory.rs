@@ -6,15 +6,16 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::config::MemoryConfig;
+use crate::config::{CurveMode, MemoryConfig};
 
 /// Metrics from memory stressor
 #[derive(Debug, Default)]
 pub struct MemoryMetrics {
     pub allocated_bytes: AtomicU64,
     pub target_bytes: AtomicU64,
+    pub cycle_count: AtomicU64,
 }
 
 /// Handle to control running memory stressor
@@ -55,10 +56,14 @@ pub fn start_memory_stressor(config: MemoryConfig) -> MemoryHandle {
     let target_bytes = config.target_mb as u64 * 1024 * 1024;
     metrics.target_bytes.store(target_bytes, Ordering::SeqCst);
 
+    let cycle_ms = (config.midpoint_ms as u64 * 2) + (config.interval * 1000);
     tracing::info!(
-        "Starting memory stressor: {}MB for {}s",
+        "Starting memory stressor: mode={:?}, {}MB-{}MB, midpoint={}ms, cycle={}ms",
+        config.mode,
+        config.start_mb,
         config.target_mb,
-        config.duration
+        config.midpoint_ms,
+        cycle_ms
     );
 
     let thread = thread::Builder::new()
@@ -75,59 +80,161 @@ pub fn start_memory_stressor(config: MemoryConfig) -> MemoryHandle {
     }
 }
 
-/// Memory worker - allocates and holds memory
+/// Memory worker - cycles through allocation patterns
+/// Cycles: ramp up → hold at max → ramp down → rest at start → repeat
 fn memory_worker(config: MemoryConfig, stop: Arc<AtomicBool>, metrics: Arc<MemoryMetrics>) {
+    let start_bytes = config.start_mb as usize * 1024 * 1024;
     let target_bytes = config.target_mb as usize * 1024 * 1024;
+    let midpoint_ms = config.midpoint_ms as u64;
+    let interval_ms = config.interval * 1000;
+    let cycle_duration_ms = (midpoint_ms * 2) + interval_ms;
+    let ramp_ms = config.ramp_duration_ms();
 
-    tracing::info!("Allocating {} bytes ({} MB)", target_bytes, config.target_mb);
+    tracing::debug!("Memory worker started, ramp_duration={}ms", ramp_ms);
 
-    // Allocate memory
+    // Pre-allocate maximum capacity
     let mut data: Vec<u8> = Vec::with_capacity(target_bytes);
-
-    // CRITICAL: Dirty every page to force physical allocation
-    // Linux page size is typically 4KB
-    let mut allocated: usize = 0;
-    for i in 0..target_bytes {
-        if stop.load(Ordering::Relaxed) {
-            tracing::info!("Memory allocation interrupted at {}MB", allocated / (1024 * 1024));
-            return;
-        }
-
+    
+    // Initialize to start_mb
+    for i in 0..start_bytes {
         data.push((i % 256) as u8);
-        allocated = i + 1;
-
-        // Update metrics and log every 100MB
-        if allocated % (100 * 1024 * 1024) == 0 {
-            metrics.allocated_bytes.store(allocated as u64, Ordering::Relaxed);
-            tracing::debug!("Allocated {}MB / {}MB", allocated / (1024 * 1024), config.target_mb);
-        }
     }
+    metrics.allocated_bytes.store(start_bytes as u64, Ordering::Relaxed);
 
-    metrics.allocated_bytes.store(target_bytes as u64, Ordering::SeqCst);
-    tracing::info!(
-        "Memory allocation complete: {}MB, holding for {}s",
-        config.target_mb,
-        config.duration
-    );
+    let mut cycle_start = Instant::now();
+    let mut cycle_count: u64 = 0;
 
-    // Hold allocation for duration
-    let duration = Duration::from_secs(config.duration);
-    let start = std::time::Instant::now();
+    while !stop.load(Ordering::Relaxed) {
+        let cycle_elapsed_ms = cycle_start.elapsed().as_millis() as u64;
 
-    while !stop.load(Ordering::Relaxed) && start.elapsed() < duration {
-        // Periodically touch memory to prevent swap-out
+        // Check if cycle completed, start new cycle
+        if cycle_elapsed_ms >= cycle_duration_ms {
+            cycle_start = Instant::now();
+            cycle_count += 1;
+            metrics.cycle_count.store(cycle_count, Ordering::Relaxed);
+            tracing::debug!("Memory stressor starting cycle {}", cycle_count + 1);
+            continue;
+        }
+
+        // Calculate target allocation for current point in cycle
+        let target_alloc = calculate_memory_target(
+            &config, cycle_elapsed_ms, midpoint_ms, start_bytes, target_bytes, ramp_ms
+        );
+
+        let current_alloc = data.len();
+
+        // Adjust allocation
+        if target_alloc > current_alloc {
+            // Grow: allocate more memory
+            let to_add = target_alloc - current_alloc;
+            for i in 0..to_add {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                data.push(((current_alloc + i) % 256) as u8);
+            }
+        } else if target_alloc < current_alloc {
+            // Shrink: deallocate memory
+            data.truncate(target_alloc);
+            data.shrink_to_fit();
+        }
+
+        // Update metrics
+        metrics.allocated_bytes.store(data.len() as u64, Ordering::Relaxed);
+
+        // Touch memory to prevent swap-out (every 4KB)
         for i in (0..data.len()).step_by(4096) {
             if stop.load(Ordering::Relaxed) {
                 break;
             }
             data[i] = data[i].wrapping_add(1);
         }
-        thread::sleep(Duration::from_secs(1));
+
+        // Small sleep to avoid tight loop
+        thread::sleep(Duration::from_millis(100));
     }
 
-    tracing::info!("Memory stressor completed, releasing {}MB", config.target_mb);
-    // data is dropped here, freeing memory
+    tracing::info!("Memory stressor stopped, releasing {}MB", data.len() / (1024 * 1024));
     metrics.allocated_bytes.store(0, Ordering::SeqCst);
+}
+
+/// Calculate target memory allocation based on cycle position
+fn calculate_memory_target(
+    config: &MemoryConfig,
+    elapsed_ms: u64,
+    midpoint_ms: u64,
+    start_bytes: usize,
+    target_bytes: usize,
+    ramp_ms: u64,
+) -> usize {
+    let phase2_start = midpoint_ms;
+    let phase3_start = midpoint_ms * 2;
+
+    if elapsed_ms < phase2_start {
+        // Phase 1: Ramp up
+        calculate_memory_ramp_up(config, elapsed_ms, ramp_ms, start_bytes, target_bytes)
+    } else if elapsed_ms < phase3_start {
+        // Phase 2: Ramp down
+        let phase_elapsed = elapsed_ms - phase2_start;
+        calculate_memory_ramp_down(config, phase_elapsed, ramp_ms, start_bytes, target_bytes)
+    } else {
+        // Phase 3: Rest at start
+        start_bytes
+    }
+}
+
+fn calculate_memory_ramp_up(
+    config: &MemoryConfig,
+    elapsed_ms: u64,
+    ramp_ms: u64,
+    start_bytes: usize,
+    target_bytes: usize,
+) -> usize {
+    let delta = target_bytes - start_bytes;
+    
+    match config.mode {
+        CurveMode::Linear => {
+            let bytes_per_ms = delta as f64 / ramp_ms as f64;
+            let additional = (bytes_per_ms * elapsed_ms as f64) as usize;
+            (start_bytes + additional).min(target_bytes)
+        }
+        CurveMode::Burst => {
+            // Instant jump to target
+            target_bytes
+        }
+        CurveMode::SCurve => {
+            let progress = (elapsed_ms as f64 / ramp_ms as f64).min(1.0);
+            let sigmoid = 1.0 / (1.0 + (-10.0 * (progress - 0.5)).exp());
+            start_bytes + (delta as f64 * sigmoid) as usize
+        }
+    }
+}
+
+fn calculate_memory_ramp_down(
+    config: &MemoryConfig,
+    phase_elapsed_ms: u64,
+    ramp_ms: u64,
+    start_bytes: usize,
+    target_bytes: usize,
+) -> usize {
+    let delta = target_bytes - start_bytes;
+    
+    match config.mode {
+        CurveMode::Linear => {
+            let bytes_per_ms = delta as f64 / ramp_ms as f64;
+            let reduction = (bytes_per_ms * phase_elapsed_ms as f64) as usize;
+            target_bytes.saturating_sub(reduction).max(start_bytes)
+        }
+        CurveMode::Burst => {
+            // Instant drop to start
+            start_bytes
+        }
+        CurveMode::SCurve => {
+            let progress = (phase_elapsed_ms as f64 / ramp_ms as f64).min(1.0);
+            let sigmoid = 1.0 / (1.0 + (-10.0 * (progress - 0.5)).exp());
+            target_bytes - (delta as f64 * sigmoid) as usize
+        }
+    }
 }
 
 #[cfg(test)]
@@ -137,9 +244,12 @@ mod tests {
     #[test]
     fn test_memory_stressor_start_stop() {
         let config = MemoryConfig {
-            target_mb: 10, // Small for testing
-            duration: 60,
-            interval: 0,
+            mode: CurveMode::Linear,
+            target_mb: 10,
+            start_mb: 0,
+            growth_rate: 10,
+            midpoint_ms: 5000,
+            interval: 1,
         };
 
         let handle = start_memory_stressor(config);
@@ -154,5 +264,30 @@ mod tests {
         assert!(allocated > 0);
         
         handle.stop();
+    }
+
+    #[test]
+    fn test_memory_ramp_calculation() {
+        let config = MemoryConfig {
+            mode: CurveMode::Linear,
+            target_mb: 100,
+            start_mb: 0,
+            growth_rate: 10, // 10 MB/s
+            midpoint_ms: 30000,
+            interval: 10,
+        };
+
+        let start_bytes = 0;
+        let target_bytes = 100 * 1024 * 1024;
+        let ramp_ms = config.ramp_duration_ms(); // 10000ms
+
+        // At t=0, should be at start
+        let at_0 = calculate_memory_ramp_up(&config, 0, ramp_ms, start_bytes, target_bytes);
+        assert_eq!(at_0, 0);
+
+        // At t=5000ms (half ramp), should be ~50MB
+        let at_half = calculate_memory_ramp_up(&config, 5000, ramp_ms, start_bytes, target_bytes);
+        let expected_half = 50 * 1024 * 1024;
+        assert!((at_half as i64 - expected_half as i64).abs() < 1024 * 1024); // Within 1MB
     }
 }

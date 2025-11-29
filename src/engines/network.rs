@@ -47,11 +47,13 @@ pub fn start_network_stressor(config: NetworkConfig) -> NetworkHandle {
     let metrics = Arc::new(NetworkMetrics::default());
     let is_running = Arc::new(AtomicBool::new(true));
 
+    let cycle_ms = (config.midpoint_ms as u64 * 2) + (config.interval * 1000);
     tracing::info!(
-        "Starting network stressor: {} connections to {} for {}s",
+        "Starting network stressor: {} connections to {}, active={}ms, cycle={}ms",
         config.connections,
         config.endpoint,
-        config.duration
+        config.midpoint_ms,
+        cycle_ms
     );
 
     let metrics_clone = Arc::clone(&metrics);
@@ -68,7 +70,8 @@ pub fn start_network_stressor(config: NetworkConfig) -> NetworkHandle {
     }
 }
 
-/// Network worker - spawns connection tasks
+/// Network worker - spawns connection tasks with cycling behavior
+/// Cycles: active (midpoint_ms * 2) → rest (interval) → repeat
 async fn network_worker(
     config: NetworkConfig,
     mut shutdown_rx: watch::Receiver<bool>,
@@ -88,73 +91,103 @@ async fn network_worker(
         }
     };
 
-    let endpoint = Arc::new(config.endpoint);
-    let duration = Duration::from_secs(config.duration);
+    let endpoint = Arc::new(config.endpoint.clone());
+    let active_duration = Duration::from_millis(config.midpoint_ms as u64 * 2);
+    let rest_duration = Duration::from_secs(config.interval);
+    let mut cycle_count: u64 = 0;
 
-    // Spawn connection tasks
-    let mut handles = Vec::new();
+    loop {
+        // Check for shutdown
+        if *shutdown_rx.borrow() {
+            break;
+        }
 
-    for i in 0..config.connections {
-        let client = client.clone();
-        let endpoint = Arc::clone(&endpoint);
-        let metrics = Arc::clone(&metrics);
-        let mut rx = shutdown_rx.clone();
+        cycle_count += 1;
+        tracing::debug!("Network stressor starting cycle {}", cycle_count);
 
-        metrics.active_connections.fetch_add(1, Ordering::Relaxed);
+        // Active phase: spawn connection tasks
+        let mut handles = Vec::new();
+        let active_shutdown = Arc::new(AtomicBool::new(false));
 
-        let handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_millis(100));
+        for i in 0..config.connections {
+            let client = client.clone();
+            let endpoint = Arc::clone(&endpoint);
+            let metrics = Arc::clone(&metrics);
+            let shutdown = Arc::clone(&active_shutdown);
 
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        match client.get(endpoint.as_str()).send().await {
-                            Ok(resp) => {
-                                metrics.requests_total.fetch_add(1, Ordering::Relaxed);
-                                tracing::trace!("Connection {}: {}", i, resp.status());
-                            }
-                            Err(e) => {
-                                metrics.errors_total.fetch_add(1, Ordering::Relaxed);
-                                tracing::warn!("Connection {} error: {}", i, e);
-                            }
+            metrics.active_connections.fetch_add(1, Ordering::Relaxed);
+
+            let handle = tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_millis(100));
+
+                while !shutdown.load(Ordering::Relaxed) {
+                    interval.tick().await;
+                    
+                    match client.get(endpoint.as_str()).send().await {
+                        Ok(resp) => {
+                            metrics.requests_total.fetch_add(1, Ordering::Relaxed);
+                            tracing::trace!("Connection {}: {}", i, resp.status());
                         }
-                    }
-                    _ = rx.changed() => {
-                        if *rx.borrow() {
-                            break;
+                        Err(e) => {
+                            metrics.errors_total.fetch_add(1, Ordering::Relaxed);
+                            tracing::trace!("Connection {} error: {}", i, e);
                         }
                     }
                 }
+
+                metrics.active_connections.fetch_sub(1, Ordering::Relaxed);
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for active duration or shutdown
+        tokio::select! {
+            _ = tokio::time::sleep(active_duration) => {
+                tracing::debug!("Network active phase complete");
             }
-
-            metrics.active_connections.fetch_sub(1, Ordering::Relaxed);
-        });
-
-        handles.push(handle);
-    }
-
-    // Wait for duration or shutdown
-    tokio::select! {
-        _ = tokio::time::sleep(duration) => {
-            tracing::info!("Network stressor duration complete");
+            _ = shutdown_rx.changed() => {
+                if *shutdown_rx.borrow() {
+                    tracing::info!("Network stressor shutdown requested");
+                    active_shutdown.store(true, Ordering::SeqCst);
+                    for handle in handles {
+                        handle.abort();
+                    }
+                    break;
+                }
+            }
         }
-        _ = shutdown_rx.changed() => {
-            tracing::info!("Network stressor shutdown requested");
-        }
-    }
 
-    // Signal all tasks to stop
-    let _ = shutdown_rx.clone();
-    
-    // Cancel all tasks
-    for handle in handles {
-        handle.abort();
+        // Stop active connections
+        active_shutdown.store(true, Ordering::SeqCst);
+        for handle in handles {
+            let _ = handle.await;
+        }
+
+        // Check for shutdown before rest phase
+        if *shutdown_rx.borrow() {
+            break;
+        }
+
+        // Rest phase
+        if rest_duration > Duration::ZERO {
+            tracing::debug!("Network rest phase: {}s", config.interval);
+            tokio::select! {
+                _ = tokio::time::sleep(rest_duration) => {}
+                _ = shutdown_rx.changed() => {
+                    if *shutdown_rx.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     is_running.store(false, Ordering::SeqCst);
     tracing::info!(
-        "Network stressor stopped. Total requests: {}, Errors: {}",
+        "Network stressor stopped. Total requests: {}, Errors: {}, Cycles: {}",
         metrics.requests_total.load(Ordering::Relaxed),
-        metrics.errors_total.load(Ordering::Relaxed)
+        metrics.errors_total.load(Ordering::Relaxed),
+        cycle_count
     );
 }
