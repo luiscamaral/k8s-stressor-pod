@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_memory_ramp_calculation() {
+    fn test_memory_linear_ramp_up() {
         let config = MemoryConfig {
             mode: CurveMode::Linear,
             target_mb: 100,
@@ -288,6 +288,128 @@ mod tests {
         // At t=5000ms (half ramp), should be ~50MB
         let at_half = calculate_memory_ramp_up(&config, 5000, ramp_ms, start_bytes, target_bytes);
         let expected_half = 50 * 1024 * 1024;
-        assert!((at_half as i64 - expected_half as i64).abs() < 1024 * 1024); // Within 1MB
+        assert!((at_half as i64 - expected_half as i64).abs() < 1024 * 1024, "Expected ~50MB, got {}", at_half / (1024 * 1024));
+
+        // At t=10000ms (full ramp), should be at target
+        let at_full = calculate_memory_ramp_up(&config, 10000, ramp_ms, start_bytes, target_bytes);
+        assert_eq!(at_full, target_bytes);
+    }
+
+    #[test]
+    fn test_memory_linear_ramp_down() {
+        let config = MemoryConfig {
+            mode: CurveMode::Linear,
+            target_mb: 100,
+            start_mb: 0,
+            growth_rate: 10, // 10 MB/s
+            midpoint_ms: 30000,
+            interval: 10,
+        };
+
+        let start_bytes = 0;
+        let target_bytes = 100 * 1024 * 1024;
+        let ramp_ms = config.ramp_duration_ms(); // 10000ms
+
+        // At phase start (t=0 into ramp down), should be at target
+        let at_0 = calculate_memory_ramp_down(&config, 0, ramp_ms, start_bytes, target_bytes);
+        assert_eq!(at_0, target_bytes);
+
+        // At t=5000ms (half ramp down), should be ~50MB
+        let at_half = calculate_memory_ramp_down(&config, 5000, ramp_ms, start_bytes, target_bytes);
+        let expected_half = 50 * 1024 * 1024;
+        assert!((at_half as i64 - expected_half as i64).abs() < 1024 * 1024, "Expected ~50MB, got {}", at_half / (1024 * 1024));
+
+        // At t=10000ms (full ramp down), should be at start
+        let at_full = calculate_memory_ramp_down(&config, 10000, ramp_ms, start_bytes, target_bytes);
+        assert_eq!(at_full, start_bytes);
+    }
+
+    #[test]
+    fn test_memory_burst_mode() {
+        let config = MemoryConfig {
+            mode: CurveMode::Burst,
+            target_mb: 100,
+            start_mb: 10,
+            growth_rate: 10,
+            midpoint_ms: 5000,
+            interval: 5,
+        };
+
+        let start_bytes = 10 * 1024 * 1024;
+        let target_bytes = 100 * 1024 * 1024;
+        let ramp_ms = config.ramp_duration_ms();
+
+        // Burst ramp up: instant jump to target
+        let ramp_up = calculate_memory_ramp_up(&config, 0, ramp_ms, start_bytes, target_bytes);
+        assert_eq!(ramp_up, target_bytes);
+
+        // Burst ramp down: instant drop to start
+        let ramp_down = calculate_memory_ramp_down(&config, 0, ramp_ms, start_bytes, target_bytes);
+        assert_eq!(ramp_down, start_bytes);
+    }
+
+    #[test]
+    fn test_memory_scurve_mode() {
+        let config = MemoryConfig {
+            mode: CurveMode::SCurve,
+            target_mb: 100,
+            start_mb: 0,
+            growth_rate: 10,
+            midpoint_ms: 30000,
+            interval: 10,
+        };
+
+        let start_bytes = 0;
+        let target_bytes = 100 * 1024 * 1024;
+        let ramp_ms = config.ramp_duration_ms();
+
+        // At half ramp, sigmoid should be ~50%
+        let at_half = calculate_memory_ramp_up(&config, ramp_ms / 2, ramp_ms, start_bytes, target_bytes);
+        let expected_half = 50 * 1024 * 1024;
+        assert!((at_half as i64 - expected_half as i64).abs() < 10 * 1024 * 1024, 
+            "S-curve at half ramp should be ~50MB, got {}", at_half / (1024 * 1024));
+
+        // At end of ramp, should approach target
+        let at_end = calculate_memory_ramp_up(&config, ramp_ms, ramp_ms, start_bytes, target_bytes);
+        assert!(at_end > 90 * 1024 * 1024, "S-curve at end should be >90MB, got {}", at_end / (1024 * 1024));
+    }
+
+    #[test]
+    fn test_memory_target_calculation_phases() {
+        let config = MemoryConfig {
+            mode: CurveMode::Linear,
+            target_mb: 100,
+            start_mb: 10,
+            growth_rate: 10, // 10 MB/s → 9s ramp
+            midpoint_ms: 30000,
+            interval: 10,
+        };
+
+        let start_bytes = 10 * 1024 * 1024;
+        let target_bytes = 100 * 1024 * 1024;
+        let midpoint_ms = config.midpoint_ms as u64;
+        let ramp_ms = config.ramp_duration_ms(); // 9000ms
+
+        // Phase 1: Ramp up (0 to midpoint)
+        // At t=0, should be at start
+        let phase1_start = calculate_memory_target(&config, 0, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        assert_eq!(phase1_start, start_bytes);
+
+        // At t=20000 (after ramp complete, holding at max)
+        let phase1_hold = calculate_memory_target(&config, 20000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        assert_eq!(phase1_hold, target_bytes);
+
+        // Phase 2: Ramp down (midpoint to 2*midpoint)
+        // At t=30000 (midpoint), starts ramp down from max
+        let phase2_start = calculate_memory_target(&config, 30000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        assert_eq!(phase2_start, target_bytes);
+
+        // At t=50000 (after ramp down complete)
+        let phase2_end = calculate_memory_target(&config, 50000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        assert_eq!(phase2_end, start_bytes);
+
+        // Phase 3: Rest (2*midpoint to cycle end)
+        let phase3 = calculate_memory_target(&config, 60000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        assert_eq!(phase3, start_bytes);
     }
 }
