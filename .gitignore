@@ -36,3 +36,9 @@ generated/
 target/coverage/
 target/llvm-cov-target/
 
+# AI Exclusions
+.ai/
+**/CLAUDE.md
+**/claude.md
+**/CLAUDE.md.bak
+**/claude.md.bak

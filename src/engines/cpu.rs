@@ -154,42 +154,63 @@ fn cpu_worker(
 }
 
 /// Calculate target load for cyclic behavior
-/// Phase 1: 0 to midpoint_ms - ramp up (or hold at max if ramp complete)
-/// Phase 2: midpoint_ms to 2*midpoint_ms - ramp down (symmetric to ramp up)
-/// Phase 3: 2*midpoint_ms to cycle_end - rest at start_value
+/// 
+/// For Linear/S-Curve:
+///   Timeline: |<-- ramp up -->|<-- hold at max -->|<-- ramp down -->|<-- rest -->|
+///             0            ramp_ms    (duration-ramp_ms)        duration    cycle_end
+///   Where:
+///     duration = 2 * midpoint_ms
+///     ramp_ms = (max - start) / growth_rate (in ms)
+///     hold_time = duration - 2 * ramp_ms
+/// 
+/// For Burst:
+///   Timeline: |<-- hold at max -->|<-- hold at start -->|<-- rest -->|
+///             0                midpoint              duration      cycle_end
 pub fn calculate_load_cyclic(config: &CpuConfig, elapsed_ms: u64, midpoint_ms: u64, _interval_ms: u64) -> f64 {
     let start = config.start_value as f64;
     let max = config.max_value as f64;
+    let duration_ms = midpoint_ms * 2;
     
-    // Phase boundaries
-    let phase2_start = midpoint_ms;
-    let phase3_start = midpoint_ms * 2;
-    
-    // Calculate peak value - what we actually reach at midpoint
-    // This ensures continuity if ramp doesn't complete within midpoint
-    let peak = calculate_ramp_up(config, midpoint_ms, midpoint_ms, start, max);
-    
-    if elapsed_ms < phase2_start {
-        // Phase 1: Ramp up (0 to midpoint)
-        calculate_ramp_up(config, elapsed_ms, midpoint_ms, start, max)
-    } else if elapsed_ms < phase3_start {
-        // Phase 2: Ramp down (midpoint to 2*midpoint) - mirror of ramp up
-        let phase2_elapsed = elapsed_ms - phase2_start;
-        calculate_ramp_down(config, phase2_elapsed, midpoint_ms, start, peak)
+    // Burst mode has different timing (instant transitions at midpoint)
+    if config.mode == CurveMode::Burst {
+        if elapsed_ms < midpoint_ms {
+            max  // Hold at max until midpoint
+        } else if elapsed_ms < duration_ms {
+            start  // Hold at start until duration
+        } else {
+            start  // Rest phase
+        }
     } else {
-        // Phase 3: Rest at start_value
-        start
+        // Linear and S-Curve use ramp timing
+        let ramp_ms = config.ramp_duration_ms();
+        
+        // Phase boundaries
+        let ramp_up_end = ramp_ms;
+        let ramp_down_start = duration_ms.saturating_sub(ramp_ms);
+        let rest_start = duration_ms;
+        
+        if elapsed_ms < ramp_up_end {
+            // Phase 1: Ramp up (0 to ramp_ms)
+            calculate_ramp_up(config, elapsed_ms, ramp_ms, start, max)
+        } else if elapsed_ms < ramp_down_start {
+            // Phase 2: Hold at max (ramp_ms to duration - ramp_ms)
+            max
+        } else if elapsed_ms < rest_start {
+            // Phase 3: Ramp down (duration - ramp_ms to duration)
+            let ramp_down_elapsed = elapsed_ms - ramp_down_start;
+            calculate_ramp_down(config, ramp_down_elapsed, ramp_ms, start, max)
+        } else {
+            // Phase 4: Rest at start_value (duration to cycle_end)
+            start
+        }
     }
 }
 
 /// Calculate load during ramp-up phase
-/// Uses midpoint_ms as the ramp duration - load increases from start toward max over midpoint_ms
-fn calculate_ramp_up(config: &CpuConfig, elapsed_ms: u64, midpoint_ms: u64, start: f64, max: f64) -> f64 {
+fn calculate_ramp_up(config: &CpuConfig, elapsed_ms: u64, ramp_ms: u64, start: f64, max: f64) -> f64 {
     match config.mode {
         CurveMode::Linear => {
-            // Linear ramp: reaches max at exactly midpoint (if growth_rate allows)
-            let progress = elapsed_ms as f64 / midpoint_ms as f64;
-            let load = start + (max - start) * progress;
+            let load = start + (config.growth_rate as f64 * elapsed_ms as f64 / 1000.0);
             load.min(max)
         }
         CurveMode::Burst => {
@@ -197,22 +218,19 @@ fn calculate_ramp_up(config: &CpuConfig, elapsed_ms: u64, midpoint_ms: u64, star
             max
         }
         CurveMode::SCurve => {
-            // Sigmoid ramp up over midpoint duration
-            let progress = (elapsed_ms as f64 / midpoint_ms as f64).min(1.0);
+            // Sigmoid ramp up
+            let progress = (elapsed_ms as f64 / ramp_ms as f64).min(1.0);
             let sigmoid = 1.0 / (1.0 + (-10.0 * (progress - 0.5)).exp());
             start + (max - start) * sigmoid
         }
     }
 }
 
-/// Calculate load during ramp-down phase (symmetric to ramp-up)
-/// peak = actual value reached at midpoint
-fn calculate_ramp_down(config: &CpuConfig, phase_elapsed_ms: u64, midpoint_ms: u64, start: f64, peak: f64) -> f64 {
+/// Calculate load during ramp-down phase
+fn calculate_ramp_down(config: &CpuConfig, phase_elapsed_ms: u64, ramp_ms: u64, start: f64, max: f64) -> f64 {
     match config.mode {
         CurveMode::Linear => {
-            // Linear ramp down: from peak back to start over midpoint_ms
-            let progress = phase_elapsed_ms as f64 / midpoint_ms as f64;
-            let load = peak - (peak - start) * progress;
+            let load = max - (config.growth_rate as f64 * phase_elapsed_ms as f64 / 1000.0);
             load.max(start)
         }
         CurveMode::Burst => {
@@ -220,10 +238,10 @@ fn calculate_ramp_down(config: &CpuConfig, phase_elapsed_ms: u64, midpoint_ms: u
             start
         }
         CurveMode::SCurve => {
-            // Sigmoid ramp down (mirror of ramp up)
-            let progress = (phase_elapsed_ms as f64 / midpoint_ms as f64).min(1.0);
+            // Sigmoid ramp down (inverted)
+            let progress = (phase_elapsed_ms as f64 / ramp_ms as f64).min(1.0);
             let sigmoid = 1.0 / (1.0 + (-10.0 * (progress - 0.5)).exp());
-            peak - (peak - start) * sigmoid
+            max - (max - start) * sigmoid
         }
     }
 }
@@ -254,8 +272,8 @@ mod tests {
             mode: CurveMode::Linear,
             start_value: 100,
             max_value: 1000,
-            growth_rate: 100, // Note: growth_rate is no longer used for ramp timing
-            midpoint_ms: 30000, // Ramp completes at midpoint (30s)
+            growth_rate: 100, // 100 milli-cores per second
+            midpoint_ms: 30000,
             interval: 10,
         };
 
@@ -265,11 +283,14 @@ mod tests {
         // At t=0, should be at start_value
         assert_eq!(calculate_load_cyclic(&config, 0, midpoint, interval), 100.0);
         
-        // At t=15s (50% of midpoint), should be 50% of the way: 100 + 0.5 * 900 = 550
-        assert_eq!(calculate_load_cyclic(&config, 15000, midpoint, interval), 550.0);
+        // At t=5s (5000ms), should be start + 5*100 = 600
+        assert_eq!(calculate_load_cyclic(&config, 5000, midpoint, interval), 600.0);
         
-        // At t=30s (midpoint), should reach max
-        assert_eq!(calculate_load_cyclic(&config, 30000, midpoint, interval), 1000.0);
+        // At t=9s (9000ms), should hit max (100 + 9*100 = 1000)
+        assert_eq!(calculate_load_cyclic(&config, 9000, midpoint, interval), 1000.0);
+        
+        // At t=15s, should still be at max (holding until midpoint)
+        assert_eq!(calculate_load_cyclic(&config, 15000, midpoint, interval), 1000.0);
     }
 
     #[test]
@@ -278,22 +299,26 @@ mod tests {
             mode: CurveMode::Linear,
             start_value: 100,
             max_value: 1000,
-            growth_rate: 100,
-            midpoint_ms: 30000,
+            growth_rate: 100, // ramp_ms = 9000
+            midpoint_ms: 30000, // duration = 60000
             interval: 10,
         };
 
         let midpoint = config.midpoint_ms as u64;
         let interval = config.interval * 1000;
+        let ramp_ms = config.ramp_duration_ms(); // 9000
+        let duration = midpoint * 2; // 60000
+        let ramp_down_start = duration - ramp_ms; // 51000
 
-        // At midpoint (30s), should be at max (peak)
-        assert_eq!(calculate_load_cyclic(&config, 30000, midpoint, interval), 1000.0);
+        // At ramp_down_start (51s), ramp down begins from max
+        let at_ramp_down_start = calculate_load_cyclic(&config, ramp_down_start, midpoint, interval);
+        assert_eq!(at_ramp_down_start, 1000.0);
         
-        // At t=45s (50% into ramp down), should be 50% of the way down: 1000 - 0.5 * 900 = 550
-        assert_eq!(calculate_load_cyclic(&config, 45000, midpoint, interval), 550.0);
+        // At t=55.5s (5500ms into ramp down), should be max - 4.5*100 = 550
+        assert_eq!(calculate_load_cyclic(&config, ramp_down_start + 4500, midpoint, interval), 550.0);
         
-        // At t=60s (2*midpoint), should be back at start_value
-        assert_eq!(calculate_load_cyclic(&config, 60000, midpoint, interval), 100.0);
+        // At t=60s (end of ramp down), should be at start_value
+        assert_eq!(calculate_load_cyclic(&config, duration, midpoint, interval), 100.0);
     }
 
     #[test]
@@ -323,50 +348,29 @@ mod tests {
             start_value: 100,
             max_value: 1000,
             growth_rate: 100,
-            midpoint_ms: 5000, // 5s at max
+            midpoint_ms: 5000, // duration = 10000
             interval: 10,
         };
 
         let midpoint = config.midpoint_ms as u64;
         let interval = config.interval * 1000;
+        let duration = midpoint * 2; // 10000
 
-        // Phase 1: instant max
-        assert_eq!(calculate_load_cyclic(&config, 0, midpoint, interval), 1000.0);
-        assert_eq!(calculate_load_cyclic(&config, 4999, midpoint, interval), 1000.0);
+        // Burst mode: instant jump to max, hold until midpoint, instant drop
+        // Phase 1: Hold at max (0 to midpoint)
+        assert_eq!(calculate_load_cyclic(&config, 0, midpoint, interval), 1000.0, "Burst start");
+        assert_eq!(calculate_load_cyclic(&config, 4999, midpoint, interval), 1000.0, "Before drop");
         
-        // Phase 2: instant drop to start
-        assert_eq!(calculate_load_cyclic(&config, 5000, midpoint, interval), 100.0);
-        assert_eq!(calculate_load_cyclic(&config, 9999, midpoint, interval), 100.0);
+        // Phase 2: Hold at start (midpoint to duration)
+        assert_eq!(calculate_load_cyclic(&config, 5000, midpoint, interval), 100.0, "After drop");
+        assert_eq!(calculate_load_cyclic(&config, 9999, midpoint, interval), 100.0, "Before rest");
         
-        // Phase 3: rest at start
-        assert_eq!(calculate_load_cyclic(&config, 10000, midpoint, interval), 100.0);
+        // Phase 3: Rest at start
+        assert_eq!(calculate_load_cyclic(&config, duration, midpoint, interval), 100.0, "Rest phase");
     }
 
     #[test]
     fn test_scurve_ramp_up() {
-        let config = CpuConfig {
-            mode: CurveMode::SCurve,
-            start_value: 0,
-            max_value: 1000,
-            growth_rate: 100,
-            midpoint_ms: 30000, // S-curve completes over midpoint_ms
-            interval: 10,
-        };
-
-        let midpoint = config.midpoint_ms as u64;
-        let interval = config.interval * 1000;
-
-        // At half of midpoint (50% progress), sigmoid should be ~50%
-        let at_half = calculate_load_cyclic(&config, midpoint / 2, midpoint, interval);
-        assert!((at_half - 500.0).abs() < 100.0, "S-curve at half midpoint should be ~50%, got {}", at_half);
-
-        // At midpoint, should approach max (sigmoid reaches ~98.7% at progress=1.0)
-        let at_midpoint = calculate_load_cyclic(&config, midpoint, midpoint, interval);
-        assert!(at_midpoint > 980.0, "S-curve at midpoint should be >98%, got {}", at_midpoint);
-    }
-
-    #[test]
-    fn test_scurve_ramp_down() {
         let config = CpuConfig {
             mode: CurveMode::SCurve,
             start_value: 0,
@@ -378,13 +382,40 @@ mod tests {
 
         let midpoint = config.midpoint_ms as u64;
         let interval = config.interval * 1000;
+        let ramp_ms = config.ramp_duration_ms();
 
-        // At midpoint (start of ramp down), peak is calculated from ramp_up at midpoint
-        let at_midpoint = calculate_load_cyclic(&config, midpoint, midpoint, interval);
-        assert!(at_midpoint > 980.0, "S-curve at midpoint should be >98%, got {}", at_midpoint);
+        // At half of ramp duration, sigmoid should be ~50%
+        let at_half_ramp = calculate_load_cyclic(&config, ramp_ms / 2, midpoint, interval);
+        assert!((at_half_ramp - 500.0).abs() < 100.0, "S-curve at half ramp should be ~50%, got {}", at_half_ramp);
 
-        // At 1.5*midpoint (50% into ramp down), should be ~50% of peak
-        let at_half_down = calculate_load_cyclic(&config, midpoint + midpoint / 2, midpoint, interval);
+        // At end of ramp, should approach max
+        let at_end_ramp = calculate_load_cyclic(&config, ramp_ms, midpoint, interval);
+        assert!(at_end_ramp > 900.0, "S-curve at end of ramp should be >90%, got {}", at_end_ramp);
+    }
+
+    #[test]
+    fn test_scurve_ramp_down() {
+        let config = CpuConfig {
+            mode: CurveMode::SCurve,
+            start_value: 0,
+            max_value: 1000,
+            growth_rate: 100, // ramp_ms = 10000
+            midpoint_ms: 30000, // duration = 60000
+            interval: 10,
+        };
+
+        let midpoint = config.midpoint_ms as u64;
+        let interval = config.interval * 1000;
+        let ramp_ms = config.ramp_duration_ms(); // 10000
+        let duration = midpoint * 2; // 60000
+        let ramp_down_start = duration - ramp_ms; // 50000
+
+        // During hold phase (after ramp up, before ramp down), should be at max
+        let at_hold = calculate_load_cyclic(&config, 30000, midpoint, interval);
+        assert!(at_hold > 990.0, "S-curve at hold phase should be >99%, got {}", at_hold);
+
+        // At half of ramp down, sigmoid should be ~50%
+        let at_half_down = calculate_load_cyclic(&config, ramp_down_start + ramp_ms / 2, midpoint, interval);
         assert!((at_half_down - 500.0).abs() < 100.0, "S-curve ramp down at half should be ~50%, got {}", at_half_down);
     }
 
@@ -394,26 +425,31 @@ mod tests {
             mode: CurveMode::Linear,
             start_value: 100,
             max_value: 1000,
-            growth_rate: 100,
-            midpoint_ms: 30000, // 30s ramp up, 30s ramp down
+            growth_rate: 100, // 100 milli-cores/s → ramp_ms = 9000
+            midpoint_ms: 30000, // duration = 60000
             interval: 10,
         };
 
         let midpoint = config.midpoint_ms as u64;
         let interval = config.interval * 1000;
+        let ramp_ms = config.ramp_duration_ms(); // 9000ms
+        let duration = midpoint * 2; // 60000
+        let ramp_down_start = duration - ramp_ms; // 51000
 
-        // Phase 1: Ramp up (0 to midpoint = 30s)
+        // Phase 1: Ramp up (0 to ramp_ms = 9s)
         assert_eq!(calculate_load_cyclic(&config, 0, midpoint, interval), 100.0, "Start of ramp up");
-        assert_eq!(calculate_load_cyclic(&config, 15000, midpoint, interval), 550.0, "Midway through ramp up");
-        assert_eq!(calculate_load_cyclic(&config, 30000, midpoint, interval), 1000.0, "End of ramp up (at max)");
+        assert_eq!(calculate_load_cyclic(&config, ramp_ms, midpoint, interval), 1000.0, "End of ramp up");
+        
+        // Phase 2: Hold at max (ramp_ms to ramp_down_start = 9s to 51s)
+        assert_eq!(calculate_load_cyclic(&config, 20000, midpoint, interval), 1000.0, "Holding at max");
+        assert_eq!(calculate_load_cyclic(&config, 50000, midpoint, interval), 1000.0, "Still holding at max");
 
-        // Phase 2: Ramp down (midpoint to 2*midpoint = 30s to 60s)
-        assert_eq!(calculate_load_cyclic(&config, 30000, midpoint, interval), 1000.0, "Start of ramp down");
-        assert_eq!(calculate_load_cyclic(&config, 45000, midpoint, interval), 550.0, "Midway through ramp down");
-        assert_eq!(calculate_load_cyclic(&config, 60000, midpoint, interval), 100.0, "End of ramp down (at start)");
+        // Phase 3: Ramp down (ramp_down_start to duration = 51s to 60s)
+        assert_eq!(calculate_load_cyclic(&config, ramp_down_start, midpoint, interval), 1000.0, "Start of ramp down");
+        assert_eq!(calculate_load_cyclic(&config, duration, midpoint, interval), 100.0, "End of ramp down");
 
-        // Phase 3: Rest (2*midpoint to cycle end)
-        assert_eq!(calculate_load_cyclic(&config, 60001, midpoint, interval), 100.0, "Rest phase start");
+        // Phase 4: Rest (duration to cycle end)
+        assert_eq!(calculate_load_cyclic(&config, 60001, midpoint, interval), 100.0, "Rest phase");
         assert_eq!(calculate_load_cyclic(&config, 65000, midpoint, interval), 100.0, "Rest phase middle");
     }
 
@@ -424,22 +460,23 @@ mod tests {
             start_value: 100,
             max_value: 1000,
             growth_rate: 100,
-            midpoint_ms: 5000, // 5s burst
+            midpoint_ms: 5000, // duration = 10000
             interval: 5, // 5s rest
         };
 
         let midpoint = config.midpoint_ms as u64;
         let interval = config.interval * 1000;
+        let duration = midpoint * 2; // 10000
 
-        // Phase 1: Instant max (0 to midpoint)
+        // Burst: Hold at max (0 to midpoint = 5s)
         assert_eq!(calculate_load_cyclic(&config, 0, midpoint, interval), 1000.0, "Burst start");
         assert_eq!(calculate_load_cyclic(&config, 4999, midpoint, interval), 1000.0, "Burst end");
 
-        // Phase 2: Instant drop to start (midpoint to 2*midpoint)
+        // Burst: Hold at start (midpoint to duration = 5s to 10s)
         assert_eq!(calculate_load_cyclic(&config, 5000, midpoint, interval), 100.0, "Valley start");
         assert_eq!(calculate_load_cyclic(&config, 9999, midpoint, interval), 100.0, "Valley end");
 
-        // Phase 3: Rest at start (2*midpoint to cycle end)
-        assert_eq!(calculate_load_cyclic(&config, 10000, midpoint, interval), 100.0, "Rest phase");
+        // Rest at start (duration to cycle end)
+        assert_eq!(calculate_load_cyclic(&config, duration, midpoint, interval), 100.0, "Rest phase");
     }
 }
