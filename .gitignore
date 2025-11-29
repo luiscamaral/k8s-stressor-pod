@@ -25,4 +25,9 @@
 # Windsurf/Codeium
 .windsurf/
 .codeium/
+.cascade/
+
+# Local only files
+.cargo/
+generated/
 
