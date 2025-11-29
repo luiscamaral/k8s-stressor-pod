@@ -10,27 +10,49 @@ use axum::{
     Json,
 };
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::config::{CpuConfig, MemoryConfig, NetworkConfig, OperationMode};
 use crate::error::AppError;
 use crate::state::SharedState;
 
 /// Response for status endpoint
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct StatusResponse {
+    /// Current operation mode
     pub mode: OperationMode,
+    /// Configuration version counter
     pub config_version: u64,
+    /// CPU stressor configuration
     pub cpu_config: CpuConfig,
+    /// Memory stressor configuration
     pub memory_config: MemoryConfig,
+    /// Network stressor configuration
     pub network_config: NetworkConfig,
 }
 
-/// GET /health
+/// Health check endpoint
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "Health",
+    responses(
+        (status = 200, description = "Service is healthy", body = String)
+    )
+)]
 pub async fn health() -> &'static str {
     "OK"
 }
 
-/// GET /status
+/// Get current status and configuration
+#[utoipa::path(
+    get,
+    path = "/status",
+    tag = "Status",
+    responses(
+        (status = 200, description = "Current stressor status", body = StatusResponse)
+    )
+)]
 pub async fn get_status(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
     Json(StatusResponse {
@@ -42,7 +64,15 @@ pub async fn get_status(State(state): State<SharedState>) -> impl IntoResponse {
     })
 }
 
-/// GET /metrics (placeholder for Phase 1)
+/// Get Prometheus metrics
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    tag = "Metrics",
+    responses(
+        (status = 200, description = "Prometheus format metrics", content_type = "text/plain")
+    )
+)]
 pub async fn get_metrics(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
     let mode_num = match s.current_mode {
@@ -74,7 +104,16 @@ pub async fn get_metrics(State(state): State<SharedState>) -> impl IntoResponse 
     )
 }
 
-/// POST /mode
+/// Set operation mode
+#[utoipa::path(
+    post,
+    path = "/mode",
+    tag = "Control",
+    request_body = OperationMode,
+    responses(
+        (status = 200, description = "Mode updated successfully")
+    )
+)]
 pub async fn set_mode(
     State(state): State<SharedState>,
     Json(mode): Json<OperationMode>,
@@ -86,7 +125,17 @@ pub async fn set_mode(
     StatusCode::OK
 }
 
-/// POST /cpu
+/// Configure CPU stressor
+#[utoipa::path(
+    post,
+    path = "/cpu",
+    tag = "Configuration",
+    request_body = CpuConfig,
+    responses(
+        (status = 200, description = "CPU configuration updated"),
+        (status = 400, description = "Invalid configuration")
+    )
+)]
 pub async fn set_cpu_config(
     State(state): State<SharedState>,
     Json(config): Json<CpuConfig>,
@@ -100,7 +149,17 @@ pub async fn set_cpu_config(
     Ok(StatusCode::OK)
 }
 
-/// POST /memory
+/// Configure memory stressor
+#[utoipa::path(
+    post,
+    path = "/memory",
+    tag = "Configuration",
+    request_body = MemoryConfig,
+    responses(
+        (status = 200, description = "Memory configuration updated"),
+        (status = 400, description = "Invalid configuration")
+    )
+)]
 pub async fn set_memory_config(
     State(state): State<SharedState>,
     Json(config): Json<MemoryConfig>,
@@ -114,7 +173,17 @@ pub async fn set_memory_config(
     Ok(StatusCode::OK)
 }
 
-/// POST /network
+/// Configure network stressor
+#[utoipa::path(
+    post,
+    path = "/network",
+    tag = "Configuration",
+    request_body = NetworkConfig,
+    responses(
+        (status = 200, description = "Network configuration updated"),
+        (status = 400, description = "Invalid configuration")
+    )
+)]
 pub async fn set_network_config(
     State(state): State<SharedState>,
     Json(config): Json<NetworkConfig>,
@@ -128,7 +197,15 @@ pub async fn set_network_config(
     Ok(StatusCode::OK)
 }
 
-/// POST /stop
+/// Stop all stressors and reset to idle
+#[utoipa::path(
+    post,
+    path = "/stop",
+    tag = "Control",
+    responses(
+        (status = 200, description = "All stressors stopped")
+    )
+)]
 pub async fn stop_all(State(state): State<SharedState>) -> impl IntoResponse {
     let mut s = state.write().await;
     tracing::info!("Stopping all stressors");

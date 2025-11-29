@@ -4,30 +4,38 @@
 // License: MIT
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// Operation mode - only one active at a time
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum OperationMode {
+    /// CPU stress testing mode
     CpuStressor,
+    /// Memory stress testing mode
     MemoryStressor,
+    /// Network stress testing mode
     NetworkStressor,
+    /// No active stressor
     #[default]
     Idle,
 }
 
-/// Load curve profile
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+/// Load curve profile for CPU stressor
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CurveMode {
+    /// Linear growth from start to max
     #[default]
     Linear,
+    /// Immediate max load for duration
     Burst,
+    /// Sigmoid curve growth
     SCurve,
 }
 
 /// CPU stressor configuration
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct CpuConfig {
     /// Curve type: linear, burst, or s-curve
     pub mode: CurveMode,
@@ -76,7 +84,7 @@ impl CpuConfig {
 }
 
 /// Memory stressor configuration
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct MemoryConfig {
     /// Target memory allocation in MB
     pub target_mb: u32,
@@ -109,7 +117,7 @@ impl MemoryConfig {
 }
 
 /// Network stressor configuration
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct NetworkConfig {
     /// Target endpoint URL
     pub endpoint: String,

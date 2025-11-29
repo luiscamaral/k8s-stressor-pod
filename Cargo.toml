@@ -27,6 +27,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "1.0"
 anyhow = "1.0"
 
+# OpenAPI / Swagger UI (versions compatible with Rust 1.75)
+utoipa = { version = "4.2", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "6", features = ["axum"] }
+
 [dev-dependencies]
 tokio-test = "0.4"
 
