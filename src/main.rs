@@ -4,15 +4,18 @@
 // License: MIT
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::{routing::{get, post}, Router};
+use tokio::sync::watch;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use k8s_stressor::api::handlers::{self, StatusResponse};
+use k8s_stressor::api::handlers::{self, StatusResponse, AppContext};
 use k8s_stressor::config::{CpuConfig, CurveMode, MemoryConfig, NetworkConfig, OperationMode};
+use k8s_stressor::orchestrator::Orchestrator;
 use k8s_stressor::state::create_shared_state;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -21,7 +24,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[openapi(
     info(
         title = "k8s-stressor API",
-        version = "0.1.0",
+        version = "0.2.0",
         description = "Deterministic resource consumption for Kubernetes reliability testing",
         license(name = "MIT"),
         contact(name = "Luis Amaral", url = "https://github.com/luiscamaral")
@@ -67,6 +70,23 @@ async fn main() {
     // Create shared state
     let state = create_shared_state();
 
+    // Create shutdown channel
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    // Start orchestrator
+    let orchestrator = Orchestrator::new(state.clone(), shutdown_rx);
+    let orchestrator_metrics = orchestrator.metrics();
+    
+    let orchestrator_handle = tokio::spawn(async move {
+        orchestrator.run().await;
+    });
+
+    // Create app context with state and metrics
+    let app_context = Arc::new(AppContext {
+        state: state.clone(),
+        metrics: orchestrator_metrics,
+    });
+
     // Build router with Swagger UI
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
@@ -80,7 +100,7 @@ async fn main() {
         .route("/network", post(handlers::set_network_config))
         .route("/stop", post(handlers::stop_all))
         .layer(TraceLayer::new_for_http())
-        .with_state(state);
+        .with_state(app_context);
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
@@ -91,7 +111,22 @@ async fn main() {
         .await
         .expect("Failed to bind to address");
     
-    axum::serve(listener, app)
-        .await
-        .expect("Server failed");
+    // Handle shutdown
+    let server = axum::serve(listener, app);
+    
+    tokio::select! {
+        result = server => {
+            if let Err(e) = result {
+                tracing::error!("Server error: {}", e);
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Received shutdown signal");
+            let _ = shutdown_tx.send(true);
+        }
+    }
+
+    // Wait for orchestrator to finish
+    let _ = orchestrator_handle.await;
+    tracing::info!("Shutdown complete");
 }

@@ -1,6 +1,6 @@
 [package]
 name = "k8s-stressor"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Luis Amaral"]
 license = "MIT"
@@ -30,6 +30,12 @@ anyhow = "1.0"
 # OpenAPI / Swagger UI (versions compatible with Rust 1.75)
 utoipa = { version = "4.2", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "6", features = ["axum"] }
+
+# System Info (for CPU detection)
+num_cpus = "1.16"
+
+# HTTP Client (for network stressor)
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
