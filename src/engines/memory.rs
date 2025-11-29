@@ -159,34 +159,41 @@ fn memory_worker(config: MemoryConfig, stop: Arc<AtomicBool>, metrics: Arc<Memor
 }
 
 /// Calculate target memory allocation based on cycle position
+/// Phase 1: 0 to midpoint - ramp up from start toward target
+/// Phase 2: midpoint to 2*midpoint - ramp down (symmetric to ramp up)
+/// Phase 3: 2*midpoint to cycle_end - rest at start
 fn calculate_memory_target(
     config: &MemoryConfig,
     elapsed_ms: u64,
     midpoint_ms: u64,
     start_bytes: usize,
     target_bytes: usize,
-    ramp_ms: u64,
+    _ramp_ms: u64,
 ) -> usize {
     let phase2_start = midpoint_ms;
     let phase3_start = midpoint_ms * 2;
+    
+    // Calculate peak - what we actually reach at midpoint
+    let peak_bytes = calculate_memory_ramp_up(config, midpoint_ms, midpoint_ms, start_bytes, target_bytes);
 
     if elapsed_ms < phase2_start {
-        // Phase 1: Ramp up
-        calculate_memory_ramp_up(config, elapsed_ms, ramp_ms, start_bytes, target_bytes)
+        // Phase 1: Ramp up (0 to midpoint)
+        calculate_memory_ramp_up(config, elapsed_ms, midpoint_ms, start_bytes, target_bytes)
     } else if elapsed_ms < phase3_start {
-        // Phase 2: Ramp down
+        // Phase 2: Ramp down (midpoint to 2*midpoint) - symmetric
         let phase_elapsed = elapsed_ms - phase2_start;
-        calculate_memory_ramp_down(config, phase_elapsed, ramp_ms, start_bytes, target_bytes)
+        calculate_memory_ramp_down(config, phase_elapsed, midpoint_ms, start_bytes, peak_bytes)
     } else {
         // Phase 3: Rest at start
         start_bytes
     }
 }
 
+/// Ramp up memory allocation over midpoint_ms duration
 fn calculate_memory_ramp_up(
     config: &MemoryConfig,
     elapsed_ms: u64,
-    ramp_ms: u64,
+    midpoint_ms: u64,
     start_bytes: usize,
     target_bytes: usize,
 ) -> usize {
@@ -194,8 +201,9 @@ fn calculate_memory_ramp_up(
     
     match config.mode {
         CurveMode::Linear => {
-            let bytes_per_ms = delta as f64 / ramp_ms as f64;
-            let additional = (bytes_per_ms * elapsed_ms as f64) as usize;
+            // Linear: reach target at exactly midpoint
+            let progress = elapsed_ms as f64 / midpoint_ms as f64;
+            let additional = (delta as f64 * progress) as usize;
             (start_bytes + additional).min(target_bytes)
         }
         CurveMode::Burst => {
@@ -203,36 +211,40 @@ fn calculate_memory_ramp_up(
             target_bytes
         }
         CurveMode::SCurve => {
-            let progress = (elapsed_ms as f64 / ramp_ms as f64).min(1.0);
+            // Sigmoid ramp over midpoint duration
+            let progress = (elapsed_ms as f64 / midpoint_ms as f64).min(1.0);
             let sigmoid = 1.0 / (1.0 + (-10.0 * (progress - 0.5)).exp());
             start_bytes + (delta as f64 * sigmoid) as usize
         }
     }
 }
 
+/// Ramp down memory allocation (symmetric to ramp up)
 fn calculate_memory_ramp_down(
     config: &MemoryConfig,
     phase_elapsed_ms: u64,
-    ramp_ms: u64,
+    midpoint_ms: u64,
     start_bytes: usize,
-    target_bytes: usize,
+    peak_bytes: usize,
 ) -> usize {
-    let delta = target_bytes - start_bytes;
+    let delta = peak_bytes - start_bytes;
     
     match config.mode {
         CurveMode::Linear => {
-            let bytes_per_ms = delta as f64 / ramp_ms as f64;
-            let reduction = (bytes_per_ms * phase_elapsed_ms as f64) as usize;
-            target_bytes.saturating_sub(reduction).max(start_bytes)
+            // Linear: reach start at exactly 2*midpoint
+            let progress = phase_elapsed_ms as f64 / midpoint_ms as f64;
+            let reduction = (delta as f64 * progress) as usize;
+            peak_bytes.saturating_sub(reduction).max(start_bytes)
         }
         CurveMode::Burst => {
             // Instant drop to start
             start_bytes
         }
         CurveMode::SCurve => {
-            let progress = (phase_elapsed_ms as f64 / ramp_ms as f64).min(1.0);
+            // Sigmoid ramp down (mirror)
+            let progress = (phase_elapsed_ms as f64 / midpoint_ms as f64).min(1.0);
             let sigmoid = 1.0 / (1.0 + (-10.0 * (progress - 0.5)).exp());
-            target_bytes - (delta as f64 * sigmoid) as usize
+            peak_bytes - (delta as f64 * sigmoid) as usize
         }
     }
 }
@@ -380,36 +392,41 @@ mod tests {
             mode: CurveMode::Linear,
             target_mb: 100,
             start_mb: 10,
-            growth_rate: 10, // 10 MB/s → 9s ramp
-            midpoint_ms: 30000,
+            growth_rate: 10, // Note: growth_rate no longer used for timing
+            midpoint_ms: 30000, // 30s ramp up, 30s ramp down
             interval: 10,
         };
 
         let start_bytes = 10 * 1024 * 1024;
         let target_bytes = 100 * 1024 * 1024;
         let midpoint_ms = config.midpoint_ms as u64;
-        let ramp_ms = config.ramp_duration_ms(); // 9000ms
+        let ramp_ms = config.ramp_duration_ms();
 
-        // Phase 1: Ramp up (0 to midpoint)
+        // Phase 1: Ramp up (0 to midpoint = 30s)
         // At t=0, should be at start
         let phase1_start = calculate_memory_target(&config, 0, midpoint_ms, start_bytes, target_bytes, ramp_ms);
         assert_eq!(phase1_start, start_bytes);
 
-        // At t=20000 (after ramp complete, holding at max)
-        let phase1_hold = calculate_memory_target(&config, 20000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
-        assert_eq!(phase1_hold, target_bytes);
+        // At t=15000 (50% of midpoint), should be 50% of the way
+        let phase1_mid = calculate_memory_target(&config, 15000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        let expected_mid = start_bytes + (target_bytes - start_bytes) / 2; // 55 MB
+        assert_eq!(phase1_mid, expected_mid);
 
-        // Phase 2: Ramp down (midpoint to 2*midpoint)
-        // At t=30000 (midpoint), starts ramp down from max
-        let phase2_start = calculate_memory_target(&config, 30000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
-        assert_eq!(phase2_start, target_bytes);
+        // At t=30000 (midpoint), should reach target
+        let phase1_end = calculate_memory_target(&config, 30000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        assert_eq!(phase1_end, target_bytes);
 
-        // At t=50000 (after ramp down complete)
-        let phase2_end = calculate_memory_target(&config, 50000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        // Phase 2: Ramp down (midpoint to 2*midpoint = 30s to 60s)
+        // At t=45000 (50% into ramp down), should be 50% of the way back
+        let phase2_mid = calculate_memory_target(&config, 45000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        assert_eq!(phase2_mid, expected_mid);
+
+        // At t=60000 (2*midpoint), should be back at start
+        let phase2_end = calculate_memory_target(&config, 60000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
         assert_eq!(phase2_end, start_bytes);
 
         // Phase 3: Rest (2*midpoint to cycle end)
-        let phase3 = calculate_memory_target(&config, 60000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        let phase3 = calculate_memory_target(&config, 65000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
         assert_eq!(phase3, start_bytes);
     }
 }
