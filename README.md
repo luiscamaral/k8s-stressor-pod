@@ -141,6 +141,18 @@ Validate that evictions respect your PDB configurations during voluntary disrupt
 
 ## Quick Start
 
+### Prerequisites
+
+```bash
+# Install Rust 1.75 via mise (recommended)
+mise install
+
+# Or use rustup
+rustup install 1.75
+```
+
+### Local Development
+
 ```bash
 # Build
 cargo build --release
@@ -151,6 +163,41 @@ cargo run
 # Test endpoints
 curl http://localhost:8080/health
 curl http://localhost:8080/status
+```
+
+### Container (Docker/Nerdctl)
+
+```bash
+# Build and start with compose
+docker compose up --build -d
+# Or with nerdctl
+nerdctl compose up --build -d
+
+# View logs
+docker compose logs -f
+
+# Stop
+docker compose down
+```
+
+### Run Integration Tests
+
+```bash
+# Start container first, then run tests
+./scripts/test-phase1.sh
+
+# Or specify a custom URL
+./scripts/test-phase1.sh http://localhost:8080
+```
+
+**Test output:**
+```
+=== Phase 1 Integration Tests ===
+Test 1: Health check... ✓ PASS
+Test 2: Ready check... ✓ PASS
+Test 3: Status endpoint... ✓ PASS
+...
+=== All 15 Phase 1 tests passed! ===
 ```
 
 For implementation details, see [`generated/implementation-plan-version-1.md`](generated/implementation-plan-version-1.md).

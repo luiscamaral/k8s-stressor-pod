@@ -1,0 +1,37 @@
+[package]
+name = "k8s-stressor"
+version = "0.1.0"
+edition = "2021"
+authors = ["Luis Amaral"]
+license = "MIT"
+description = "Deterministic resource consumption for Kubernetes reliability testing"
+
+[dependencies]
+# Async Runtime
+tokio = { version = "1", features = ["full", "sync", "time", "rt-multi-thread"] }
+
+# Web Framework
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error Handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

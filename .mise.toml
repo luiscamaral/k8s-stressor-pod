@@ -1,0 +1,5 @@
+# Author: Luis Amaral
+# Created: 2024-11-28
+
+[tools]
+rust = "1.75"
