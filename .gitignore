@@ -29,5 +29,10 @@
 
 # Local only files
 .cargo/
+.cascade/
 generated/
+
+# Coverage reports
+target/coverage/
+target/llvm-cov-target/
 

@@ -110,7 +110,7 @@ curl -X POST http://stressor:8080/mode \
 # Configure CPU stress
 curl -X POST http://stressor:8080/cpu \
   -H "Content-Type: application/json" \
-  -d '{"mode":"linear","max_value":2000,"start_value":100,"growth_rate":50,"duration":120,"interval":10}'
+  -d '{"mode":"linear","max_value":2000,"start_value":100,"growth_rate":50,"midpoint_ms":60000,"interval":10}'
 
 # Get current status
 curl http://stressor:8080/status
@@ -180,24 +180,30 @@ docker compose logs -f
 docker compose down
 ```
 
-### Run Integration Tests
+### Testing
 
 ```bash
-# Start container first, then run tests
-./scripts/test-phase1.sh
+# Run unit tests
+cargo test
 
-# Or specify a custom URL
-./scripts/test-phase1.sh http://localhost:8080
+# Run integration tests (start container first)
+./scripts/test-phase1.sh   # API foundation tests
+./scripts/test-phase2.sh   # Stressor engine tests
+
+# Specify custom URL
+./scripts/test-phase2.sh http://localhost:8080
 ```
 
-**Test output:**
-```
-=== Phase 1 Integration Tests ===
-Test 1: Health check... ✓ PASS
-Test 2: Ready check... ✓ PASS
-Test 3: Status endpoint... ✓ PASS
-...
-=== All 15 Phase 1 tests passed! ===
+### Code Coverage
+
+```bash
+# Install coverage tool (one-time)
+cargo install cargo-llvm-cov@0.6.15 --locked
+
+# Run coverage
+./scripts/coverage.sh summary   # Terminal summary
+./scripts/coverage.sh html      # HTML report (opens browser)
+./scripts/coverage.sh lcov      # LCOV format for CI
 ```
 
 For implementation details, see [`generated/implementation-plan-version-1.md`](generated/implementation-plan-version-1.md).
