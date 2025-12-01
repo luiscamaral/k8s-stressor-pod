@@ -14,7 +14,8 @@ echo ""
 # Test 1: Health check
 echo -n "Test 1: Health check... "
 HEALTH=$(curl -sf "$BASE_URL/health")
-if [ "$HEALTH" = "OK" ]; then
+STATUS=$(echo "$HEALTH" | jq -r '.status')
+if [ "$STATUS" = "healthy" ]; then
     echo "✓ PASS"
 else
     echo "✗ FAIL (got: $HEALTH)"
@@ -24,13 +25,13 @@ fi
 # Test 2: CPU Stressor
 echo "Test 2: CPU Stressor"
 echo -n "  Setting CPU config... "
-curl -sf -X POST "$BASE_URL/cpu" \
+curl -sf -X PUT "$BASE_URL/config/cpu" \
     -H "Content-Type: application/json" \
     -d '{"mode":"linear","max_value":500,"start_value":100,"growth_rate":50,"midpoint_ms":30000,"interval":5}' > /dev/null
 echo "✓"
 
 echo -n "  Setting mode to cpu-stressor... "
-curl -sf -X POST "$BASE_URL/mode" \
+curl -sf -X PUT "$BASE_URL/mode" \
     -H "Content-Type: application/json" \
     -d '"cpu-stressor"' > /dev/null
 echo "✓"
@@ -56,20 +57,20 @@ else
 fi
 
 echo -n "  Stopping... "
-curl -sf -X POST "$BASE_URL/stop" > /dev/null
+curl -sf -X PUT "$BASE_URL/stop" > /dev/null
 echo "✓"
 echo ""
 
 # Test 3: Memory Stressor
 echo "Test 3: Memory Stressor"
 echo -n "  Setting memory config (50MB)... "
-curl -sf -X POST "$BASE_URL/memory" \
+curl -sf -X PUT "$BASE_URL/config/memory" \
     -H "Content-Type: application/json" \
     -d '{"mode":"linear","target_mb":50,"start_mb":0,"growth_rate":10,"midpoint_ms":30000,"interval":5}' > /dev/null
 echo "✓"
 
 echo -n "  Setting mode to memory-stressor... "
-curl -sf -X POST "$BASE_URL/mode" \
+curl -sf -X PUT "$BASE_URL/mode" \
     -H "Content-Type: application/json" \
     -d '"memory-stressor"' > /dev/null
 echo "✓"
@@ -96,18 +97,18 @@ else
 fi
 
 echo -n "  Stopping... "
-curl -sf -X POST "$BASE_URL/stop" > /dev/null
+curl -sf -X PUT "$BASE_URL/stop" > /dev/null
 echo "✓"
 echo ""
 
 # Test 4: Mode switching
 echo "Test 4: Mode Switching"
 echo -n "  Switching CPU -> Memory -> Idle... "
-curl -sf -X POST "$BASE_URL/mode" -H "Content-Type: application/json" -d '"cpu-stressor"' > /dev/null
+curl -sf -X PUT "$BASE_URL/mode" -H "Content-Type: application/json" -d '"cpu-stressor"' > /dev/null
 sleep 1
-curl -sf -X POST "$BASE_URL/mode" -H "Content-Type: application/json" -d '"memory-stressor"' > /dev/null
+curl -sf -X PUT "$BASE_URL/mode" -H "Content-Type: application/json" -d '"memory-stressor"' > /dev/null
 sleep 1
-curl -sf -X POST "$BASE_URL/stop" > /dev/null
+curl -sf -X PUT "$BASE_URL/stop" > /dev/null
 MODE=$(curl -sf "$BASE_URL/status" | jq -r '.mode')
 if [ "$MODE" = "idle" ]; then
     echo "✓"
@@ -119,7 +120,7 @@ echo ""
 # Test 5: Version counter
 echo "Test 5: Config Version Counter"
 V1=$(curl -sf "$BASE_URL/status" | jq '.config_version')
-curl -sf -X POST "$BASE_URL/cpu" \
+curl -sf -X PUT "$BASE_URL/config/cpu" \
     -H "Content-Type: application/json" \
     -d '{"mode":"burst","max_value":1000,"start_value":0,"growth_rate":100,"midpoint_ms":5000,"interval":5}' > /dev/null
 V2=$(curl -sf "$BASE_URL/status" | jq '.config_version')
@@ -161,12 +162,12 @@ echo ""
 
 # Test 7: Graceful shutdown verification (mode resets metrics)
 echo "Test 7: Metrics Reset on Stop"
-curl -sf -X POST "$BASE_URL/cpu" \
+curl -sf -X PUT "$BASE_URL/config/cpu" \
     -H "Content-Type: application/json" \
     -d '{"mode":"linear","max_value":500,"start_value":100,"growth_rate":50,"midpoint_ms":30000,"interval":5}' > /dev/null
-curl -sf -X POST "$BASE_URL/mode" -H "Content-Type: application/json" -d '"cpu-stressor"' > /dev/null
+curl -sf -X PUT "$BASE_URL/mode" -H "Content-Type: application/json" -d '"cpu-stressor"' > /dev/null
 sleep 2
-curl -sf -X POST "$BASE_URL/stop" > /dev/null
+curl -sf -X PUT "$BASE_URL/stop" > /dev/null
 sleep 1
 echo -n "  CPU metrics reset to 0... "
 CPU_TARGET=$(curl -sf "$BASE_URL/metrics" | grep "^stressor_cpu_target_millicores" | awk '{print $2}')
@@ -180,13 +181,13 @@ echo ""
 # Test 8: Network Stressor (if endpoint available)
 echo "Test 8: Network Stressor"
 echo -n "  Setting network config... "
-curl -sf -X POST "$BASE_URL/network" \
+curl -sf -X PUT "$BASE_URL/config/network" \
     -H "Content-Type: application/json" \
-    -d '{"endpoint":"http://localhost:8080/health","connections":2,"midpoint_ms":5000,"interval":5}' > /dev/null
+    -d '{"endpoint":"http://localhost:8080/health","protocol":"http","connections":2,"midpoint_ms":5000,"interval":5}' > /dev/null
 echo "✓"
 
 echo -n "  Setting mode to network-stressor... "
-curl -sf -X POST "$BASE_URL/mode" \
+curl -sf -X PUT "$BASE_URL/mode" \
     -H "Content-Type: application/json" \
     -d '"network-stressor"' > /dev/null
 echo "✓"
@@ -204,25 +205,43 @@ else
 fi
 
 echo -n "  Stopping... "
-curl -sf -X POST "$BASE_URL/stop" > /dev/null
+curl -sf -X PUT "$BASE_URL/stop" > /dev/null
 echo "✓"
 echo ""
 
 # Test 9: Burst mode verification
 echo "Test 9: Burst Mode"
 echo -n "  Setting burst CPU config... "
-curl -sf -X POST "$BASE_URL/cpu" \
+curl -sf -X PUT "$BASE_URL/config/cpu" \
     -H "Content-Type: application/json" \
     -d '{"mode":"burst","max_value":800,"start_value":100,"growth_rate":100,"midpoint_ms":3000,"interval":2}' > /dev/null
 echo "✓"
 
 echo -n "  Starting burst mode... "
-curl -sf -X POST "$BASE_URL/mode" -H "Content-Type: application/json" -d '"cpu-stressor"' > /dev/null
+curl -sf -X PUT "$BASE_URL/mode" -H "Content-Type: application/json" -d '"cpu-stressor"' > /dev/null
 sleep 1
 BURST_TARGET=$(curl -sf "$BASE_URL/metrics" | grep "^stressor_cpu_target_millicores" | awk '{print $2}')
 echo "✓ (target: ${BURST_TARGET}m)"
 
-curl -sf -X POST "$BASE_URL/stop" > /dev/null
+curl -sf -X PUT "$BASE_URL/stop" > /dev/null
+echo ""
+
+# Test 10: Status endpoint structure
+echo "Test 10: Status Endpoint Structure"
+echo -n "  Checking status has is_active field... "
+STATUS=$(curl -sf "$BASE_URL/status")
+if echo "$STATUS" | jq 'has("is_active")' | grep -q true; then
+    echo "✓"
+else
+    echo "✗"
+fi
+
+echo -n "  Checking status does NOT have cpu_config... "
+if echo "$STATUS" | jq -e '.cpu_config' > /dev/null 2>&1; then
+    echo "✗ (should not have cpu_config)"
+else
+    echo "✓"
+fi
 echo ""
 
 echo "=== All Phase 2 tests completed! ==="

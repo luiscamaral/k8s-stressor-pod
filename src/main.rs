@@ -6,14 +6,14 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{routing::{get, post}, Router};
+use axum::{routing::{get, put}, Router};
 use tokio::sync::watch;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use k8s_stressor::api::handlers::{self, StatusResponse, AppContext};
+use k8s_stressor::api::handlers::{self, StatusResponse, HealthResponse, AppContext};
 use k8s_stressor::config::{CpuConfig, CurveMode, MemoryConfig, NetworkConfig, OperationMode};
 use k8s_stressor::orchestrator::Orchestrator;
 use k8s_stressor::state::create_shared_state;
@@ -31,16 +31,22 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
     ),
     paths(
         handlers::health,
+        handlers::ready,
         handlers::get_status,
         handlers::get_metrics,
+        handlers::get_mode,
         handlers::set_mode,
+        handlers::get_cpu_config,
         handlers::set_cpu_config,
+        handlers::get_memory_config,
         handlers::set_memory_config,
+        handlers::get_network_config,
         handlers::set_network_config,
         handlers::stop_all,
     ),
     components(schemas(
         StatusResponse,
+        HealthResponse,
         OperationMode,
         CurveMode,
         CpuConfig,
@@ -90,15 +96,20 @@ async fn main() {
     // Build router with Swagger UI
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        // Health endpoints
         .route("/health", get(handlers::health))
-        .route("/ready", get(handlers::health))
+        .route("/ready", get(handlers::ready))
+        // Status and metrics
         .route("/status", get(handlers::get_status))
         .route("/metrics", get(handlers::get_metrics))
-        .route("/mode", post(handlers::set_mode))
-        .route("/cpu", post(handlers::set_cpu_config))
-        .route("/memory", post(handlers::set_memory_config))
-        .route("/network", post(handlers::set_network_config))
-        .route("/stop", post(handlers::stop_all))
+        // Mode control
+        .route("/mode", get(handlers::get_mode).put(handlers::set_mode))
+        // Configuration endpoints
+        .route("/config/cpu", get(handlers::get_cpu_config).put(handlers::set_cpu_config))
+        .route("/config/memory", get(handlers::get_memory_config).put(handlers::set_memory_config))
+        .route("/config/network", get(handlers::get_network_config).put(handlers::set_network_config))
+        // Stop control
+        .route("/stop", put(handlers::stop_all))
         .layer(TraceLayer::new_for_http())
         .with_state(app_context);
 
