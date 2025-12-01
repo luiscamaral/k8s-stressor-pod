@@ -6,14 +6,17 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{routing::{get, put}, Router};
+use axum::{
+    routing::{get, put},
+    Router,
+};
 use tokio::sync::watch;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use k8s_stressor::api::handlers::{self, StatusResponse, HealthResponse, AppContext};
+use k8s_stressor::api::handlers::{self, AppContext, HealthResponse, StatusResponse};
 use k8s_stressor::config::{CpuConfig, CurveMode, MemoryConfig, NetworkConfig, OperationMode};
 use k8s_stressor::orchestrator::Orchestrator;
 use k8s_stressor::state::create_shared_state;
@@ -82,7 +85,7 @@ async fn main() {
     // Start orchestrator
     let orchestrator = Orchestrator::new(state.clone(), shutdown_rx);
     let orchestrator_metrics = orchestrator.metrics();
-    
+
     let orchestrator_handle = tokio::spawn(async move {
         orchestrator.run().await;
     });
@@ -105,9 +108,18 @@ async fn main() {
         // Mode control
         .route("/mode", get(handlers::get_mode).put(handlers::set_mode))
         // Configuration endpoints
-        .route("/config/cpu", get(handlers::get_cpu_config).put(handlers::set_cpu_config))
-        .route("/config/memory", get(handlers::get_memory_config).put(handlers::set_memory_config))
-        .route("/config/network", get(handlers::get_network_config).put(handlers::set_network_config))
+        .route(
+            "/config/cpu",
+            get(handlers::get_cpu_config).put(handlers::set_cpu_config),
+        )
+        .route(
+            "/config/memory",
+            get(handlers::get_memory_config).put(handlers::set_memory_config),
+        )
+        .route(
+            "/config/network",
+            get(handlers::get_network_config).put(handlers::set_network_config),
+        )
         // Stop control
         .route("/stop", put(handlers::stop_all))
         .layer(TraceLayer::new_for_http())
@@ -121,10 +133,10 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Failed to bind to address");
-    
+
     // Handle shutdown
     let server = axum::serve(listener, app);
-    
+
     tokio::select! {
         result = server => {
             if let Err(e) = result {

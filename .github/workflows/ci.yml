@@ -214,11 +214,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz | tar xz
+          sudo mv kubeconform /usr/local/bin/
+
       - name: Validate Kubernetes manifests
         run: |
           for file in k8s/*.yaml; do
             echo "Validating $file..."
-            kubectl apply --dry-run=client -f "$file" || exit 1
+            kubeconform -strict -summary "$file" || exit 1
           done
-        env:
-          KUBECONFIG: /dev/null

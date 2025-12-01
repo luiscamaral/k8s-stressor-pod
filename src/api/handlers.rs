@@ -6,12 +6,7 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -139,7 +134,10 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
     let cpu_threads = ctx.metrics.cpu_active_threads.load(Ordering::Relaxed);
     let mem_target = ctx.metrics.memory_target_bytes.load(Ordering::Relaxed);
     let mem_allocated = ctx.metrics.memory_allocated_bytes.load(Ordering::Relaxed);
-    let net_connections = ctx.metrics.network_active_connections.load(Ordering::Relaxed);
+    let net_connections = ctx
+        .metrics
+        .network_active_connections
+        .load(Ordering::Relaxed);
     let net_requests = ctx.metrics.network_requests_total.load(Ordering::Relaxed);
     let net_errors = ctx.metrics.network_errors_total.load(Ordering::Relaxed);
 
@@ -176,7 +174,11 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
          stressor_network_errors_total {}\n",
         mode_num,
         s.config_version,
-        if s.current_mode == OperationMode::Idle { 0 } else { 1 },
+        if s.current_mode == OperationMode::Idle {
+            0
+        } else {
+            1
+        },
         cpu_target,
         cpu_threads,
         mem_target,

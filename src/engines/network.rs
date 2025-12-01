@@ -122,7 +122,7 @@ async fn network_worker(
 
                 while !shutdown.load(Ordering::Relaxed) {
                     interval.tick().await;
-                    
+
                     match client.get(endpoint.as_str()).send().await {
                         Ok(resp) => {
                             metrics.requests_total.fetch_add(1, Ordering::Relaxed);

@@ -30,13 +30,13 @@ impl MemoryHandle {
     pub fn stop(mut self) {
         tracing::info!("Stopping memory stressor...");
         self.stop_flag.store(true, Ordering::SeqCst);
-        
+
         if let Some(handle) = self.thread.take() {
             if let Err(e) = handle.join() {
                 tracing::warn!("Memory thread join error: {:?}", e);
             }
         }
-        
+
         tracing::info!("Memory stressor stopped");
     }
 
@@ -94,12 +94,14 @@ fn memory_worker(config: MemoryConfig, stop: Arc<AtomicBool>, metrics: Arc<Memor
 
     // Pre-allocate maximum capacity
     let mut data: Vec<u8> = Vec::with_capacity(target_bytes);
-    
+
     // Initialize to start_mb
     for i in 0..start_bytes {
         data.push((i % 256) as u8);
     }
-    metrics.allocated_bytes.store(start_bytes as u64, Ordering::Relaxed);
+    metrics
+        .allocated_bytes
+        .store(start_bytes as u64, Ordering::Relaxed);
 
     let mut cycle_start = Instant::now();
     let mut cycle_count: u64 = 0;
@@ -118,29 +120,42 @@ fn memory_worker(config: MemoryConfig, stop: Arc<AtomicBool>, metrics: Arc<Memor
 
         // Calculate target allocation for current point in cycle
         let target_alloc = calculate_memory_target(
-            &config, cycle_elapsed_ms, midpoint_ms, start_bytes, target_bytes, ramp_ms
+            &config,
+            cycle_elapsed_ms,
+            midpoint_ms,
+            start_bytes,
+            target_bytes,
+            ramp_ms,
         );
 
         let current_alloc = data.len();
 
-        // Adjust allocation
-        if target_alloc > current_alloc {
-            // Grow: allocate more memory
-            let to_add = target_alloc - current_alloc;
-            for i in 0..to_add {
-                if stop.load(Ordering::Relaxed) {
-                    break;
+        // Adjust allocation using match for comparison chain
+        match target_alloc.cmp(&current_alloc) {
+            std::cmp::Ordering::Greater => {
+                // Grow: allocate more memory
+                let to_add = target_alloc - current_alloc;
+                for i in 0..to_add {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    data.push(((current_alloc + i) % 256) as u8);
                 }
-                data.push(((current_alloc + i) % 256) as u8);
             }
-        } else if target_alloc < current_alloc {
-            // Shrink: deallocate memory
-            data.truncate(target_alloc);
-            data.shrink_to_fit();
+            std::cmp::Ordering::Less => {
+                // Shrink: deallocate memory
+                data.truncate(target_alloc);
+                data.shrink_to_fit();
+            }
+            std::cmp::Ordering::Equal => {
+                // No change needed
+            }
         }
 
         // Update metrics
-        metrics.allocated_bytes.store(data.len() as u64, Ordering::Relaxed);
+        metrics
+            .allocated_bytes
+            .store(data.len() as u64, Ordering::Relaxed);
 
         // Touch memory to prevent swap-out (every 4KB)
         for i in (0..data.len()).step_by(4096) {
@@ -154,12 +169,15 @@ fn memory_worker(config: MemoryConfig, stop: Arc<AtomicBool>, metrics: Arc<Memor
         thread::sleep(Duration::from_millis(100));
     }
 
-    tracing::info!("Memory stressor stopped, releasing {}MB", data.len() / (1024 * 1024));
+    tracing::info!(
+        "Memory stressor stopped, releasing {}MB",
+        data.len() / (1024 * 1024)
+    );
     metrics.allocated_bytes.store(0, Ordering::SeqCst);
 }
 
 /// Calculate target memory allocation based on cycle position
-/// 
+///
 /// Timeline: |<-- ramp up -->|<-- hold at max -->|<-- ramp down -->|<-- rest -->|
 ///           0            ramp_ms    (duration-ramp_ms)        duration    cycle_end
 fn calculate_memory_target(
@@ -171,7 +189,7 @@ fn calculate_memory_target(
     ramp_ms: u64,
 ) -> usize {
     let duration_ms = midpoint_ms * 2;
-    
+
     // Phase boundaries
     let ramp_up_end = ramp_ms;
     let ramp_down_start = duration_ms.saturating_sub(ramp_ms);
@@ -186,7 +204,13 @@ fn calculate_memory_target(
     } else if elapsed_ms < rest_start {
         // Phase 3: Ramp down (duration - ramp_ms to duration)
         let ramp_down_elapsed = elapsed_ms - ramp_down_start;
-        calculate_memory_ramp_down(config, ramp_down_elapsed, ramp_ms, start_bytes, target_bytes)
+        calculate_memory_ramp_down(
+            config,
+            ramp_down_elapsed,
+            ramp_ms,
+            start_bytes,
+            target_bytes,
+        )
     } else {
         // Phase 4: Rest at start (duration to cycle_end)
         start_bytes
@@ -201,7 +225,7 @@ fn calculate_memory_ramp_up(
     target_bytes: usize,
 ) -> usize {
     let delta = target_bytes - start_bytes;
-    
+
     match config.mode {
         CurveMode::Linear => {
             let bytes_per_ms = delta as f64 / ramp_ms as f64;
@@ -228,7 +252,7 @@ fn calculate_memory_ramp_down(
     target_bytes: usize,
 ) -> usize {
     let delta = target_bytes - start_bytes;
-    
+
     match config.mode {
         CurveMode::Linear => {
             let bytes_per_ms = delta as f64 / ramp_ms as f64;
@@ -263,16 +287,16 @@ mod tests {
         };
 
         let handle = start_memory_stressor(config);
-        
+
         // Give it time to allocate
         thread::sleep(Duration::from_millis(500));
-        
+
         assert!(handle.is_running());
-        
+
         // Check metrics
         let allocated = handle.metrics.allocated_bytes.load(Ordering::Relaxed);
         assert!(allocated > 0);
-        
+
         handle.stop();
     }
 
@@ -298,7 +322,11 @@ mod tests {
         // At t=5000ms (half ramp), should be ~50MB
         let at_half = calculate_memory_ramp_up(&config, 5000, ramp_ms, start_bytes, target_bytes);
         let expected_half = 50 * 1024 * 1024;
-        assert!((at_half as i64 - expected_half as i64).abs() < 1024 * 1024, "Expected ~50MB, got {}", at_half / (1024 * 1024));
+        assert!(
+            (at_half as i64 - expected_half as i64).abs() < 1024 * 1024,
+            "Expected ~50MB, got {}",
+            at_half / (1024 * 1024)
+        );
 
         // At t=10000ms (full ramp), should be at target
         let at_full = calculate_memory_ramp_up(&config, 10000, ramp_ms, start_bytes, target_bytes);
@@ -327,10 +355,15 @@ mod tests {
         // At t=5000ms (half ramp down), should be ~50MB
         let at_half = calculate_memory_ramp_down(&config, 5000, ramp_ms, start_bytes, target_bytes);
         let expected_half = 50 * 1024 * 1024;
-        assert!((at_half as i64 - expected_half as i64).abs() < 1024 * 1024, "Expected ~50MB, got {}", at_half / (1024 * 1024));
+        assert!(
+            (at_half as i64 - expected_half as i64).abs() < 1024 * 1024,
+            "Expected ~50MB, got {}",
+            at_half / (1024 * 1024)
+        );
 
         // At t=10000ms (full ramp down), should be at start
-        let at_full = calculate_memory_ramp_down(&config, 10000, ramp_ms, start_bytes, target_bytes);
+        let at_full =
+            calculate_memory_ramp_down(&config, 10000, ramp_ms, start_bytes, target_bytes);
         assert_eq!(at_full, start_bytes);
     }
 
@@ -374,14 +407,22 @@ mod tests {
         let ramp_ms = config.ramp_duration_ms();
 
         // At half ramp, sigmoid should be ~50%
-        let at_half = calculate_memory_ramp_up(&config, ramp_ms / 2, ramp_ms, start_bytes, target_bytes);
+        let at_half =
+            calculate_memory_ramp_up(&config, ramp_ms / 2, ramp_ms, start_bytes, target_bytes);
         let expected_half = 50 * 1024 * 1024;
-        assert!((at_half as i64 - expected_half as i64).abs() < 10 * 1024 * 1024, 
-            "S-curve at half ramp should be ~50MB, got {}", at_half / (1024 * 1024));
+        assert!(
+            (at_half as i64 - expected_half as i64).abs() < 10 * 1024 * 1024,
+            "S-curve at half ramp should be ~50MB, got {}",
+            at_half / (1024 * 1024)
+        );
 
         // At end of ramp, should approach target
         let at_end = calculate_memory_ramp_up(&config, ramp_ms, ramp_ms, start_bytes, target_bytes);
-        assert!(at_end > 90 * 1024 * 1024, "S-curve at end should be >90MB, got {}", at_end / (1024 * 1024));
+        assert!(
+            at_end > 90 * 1024 * 1024,
+            "S-curve at end should be >90MB, got {}",
+            at_end / (1024 * 1024)
+        );
     }
 
     #[test]
@@ -390,7 +431,7 @@ mod tests {
             mode: CurveMode::Linear,
             target_mb: 100,
             start_mb: 10,
-            growth_rate: 10, // 10 MB/s → ramp_ms = 9000
+            growth_rate: 10,    // 10 MB/s → ramp_ms = 9000
             midpoint_ms: 30000, // duration = 60000
             interval: 10,
         };
@@ -403,25 +444,61 @@ mod tests {
         let ramp_down_start = duration - ramp_ms; // 51000
 
         // Phase 1: Ramp up (0 to ramp_ms = 9s)
-        let phase1_start = calculate_memory_target(&config, 0, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        let phase1_start =
+            calculate_memory_target(&config, 0, midpoint_ms, start_bytes, target_bytes, ramp_ms);
         assert_eq!(phase1_start, start_bytes, "Start of ramp up");
 
         // Phase 2: Hold at max (ramp_ms to ramp_down_start = 9s to 51s)
-        let phase2_hold = calculate_memory_target(&config, 20000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        let phase2_hold = calculate_memory_target(
+            &config,
+            20000,
+            midpoint_ms,
+            start_bytes,
+            target_bytes,
+            ramp_ms,
+        );
         assert_eq!(phase2_hold, target_bytes, "Holding at max");
-        
-        let phase2_still_hold = calculate_memory_target(&config, 50000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+
+        let phase2_still_hold = calculate_memory_target(
+            &config,
+            50000,
+            midpoint_ms,
+            start_bytes,
+            target_bytes,
+            ramp_ms,
+        );
         assert_eq!(phase2_still_hold, target_bytes, "Still holding at max");
 
         // Phase 3: Ramp down (ramp_down_start to duration = 51s to 60s)
-        let phase3_start = calculate_memory_target(&config, ramp_down_start, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        let phase3_start = calculate_memory_target(
+            &config,
+            ramp_down_start,
+            midpoint_ms,
+            start_bytes,
+            target_bytes,
+            ramp_ms,
+        );
         assert_eq!(phase3_start, target_bytes, "Start of ramp down");
-        
-        let phase3_end = calculate_memory_target(&config, duration, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+
+        let phase3_end = calculate_memory_target(
+            &config,
+            duration,
+            midpoint_ms,
+            start_bytes,
+            target_bytes,
+            ramp_ms,
+        );
         assert_eq!(phase3_end, start_bytes, "End of ramp down");
 
         // Phase 4: Rest (duration to cycle end)
-        let phase4 = calculate_memory_target(&config, 65000, midpoint_ms, start_bytes, target_bytes, ramp_ms);
+        let phase4 = calculate_memory_target(
+            &config,
+            65000,
+            midpoint_ms,
+            start_bytes,
+            target_bytes,
+            ramp_ms,
+        );
         assert_eq!(phase4, start_bytes, "Rest phase");
     }
 }
