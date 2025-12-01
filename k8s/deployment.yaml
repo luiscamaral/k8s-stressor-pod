@@ -1,0 +1,76 @@
+# Copyright (c) 2024 Luis Amaral
+# Author: Luis Amaral
+# Created: 2024-11-28
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-stressor
+  labels:
+    app.kubernetes.io/name: k8s-stressor
+    app.kubernetes.io/component: stressor
+    app.kubernetes.io/part-of: reliability-testing
+    app.kubernetes.io/managed-by: kubectl
+    app.kubernetes.io/version: "0.3.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: k8s-stressor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: k8s-stressor
+        app.kubernetes.io/component: stressor
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: default
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: stressor
+        image: ghcr.io/luiscamaral/k8s-stressor-pod:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: RUST_LOG
+          value: "info"
+        - name: RUST_BACKTRACE
+          value: "1"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "4000m"
+            memory: "2Gi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3

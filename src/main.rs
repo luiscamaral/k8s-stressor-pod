@@ -24,7 +24,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[openapi(
     info(
         title = "k8s-stressor API",
-        version = "0.2.0",
+        version = "0.3.0",
         description = "Deterministic resource consumption for Kubernetes reliability testing",
         license(name = "MIT"),
         contact(name = "Luis Amaral", url = "https://github.com/luiscamaral")
