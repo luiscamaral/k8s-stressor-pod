@@ -1,0 +1,47 @@
+[package]
+name = "k8s-stressor"
+version = "0.2.0"
+edition = "2021"
+authors = ["Luis Amaral"]
+license = "MIT"
+description = "Deterministic resource consumption for Kubernetes reliability testing"
+
+[dependencies]
+# Async Runtime
+tokio = { version = "1", features = ["full", "sync", "time", "rt-multi-thread"] }
+
+# Web Framework
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error Handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# OpenAPI / Swagger UI (versions compatible with Rust 1.75)
+utoipa = { version = "4.2", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "6", features = ["axum"] }
+
+# System Info (for CPU detection)
+num_cpus = "1.16"
+
+# HTTP Client (for network stressor)
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

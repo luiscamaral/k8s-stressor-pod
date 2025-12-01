@@ -1,0 +1,22 @@
+# Copyright (c) 2024 Luis Amaral
+# Author: Luis Amaral
+# Created: 2024-11-28
+
+services:
+  stressor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: k8s-stressor:0.2.0
+    container_name: k8s-stressor
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped

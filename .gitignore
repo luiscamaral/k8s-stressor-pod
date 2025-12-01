@@ -1,10 +1,44 @@
-# Local files
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo
+# Keep Cargo.lock for reproducible builds (this is a binary)
+# Cargo.lock
+
+# IDE and editor
 .history
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
 .DS_Store
+
+# Logs and temp files
 *.log
 *.tmp
+
+# Windsurf/Codeium
 .windsurf/
 .codeium/
 .cascade/
+
+# Local only files
+.cargo/
+.cascade/
 generated/
 
+# Coverage reports
+target/coverage/
+target/llvm-cov-target/
+
+# AI Exclusions
+.ai/
+**/CLAUDE.md
+**/claude.md
+**/CLAUDE.md.bak
+**/claude.md.bak

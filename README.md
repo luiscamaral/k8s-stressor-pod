@@ -2,6 +2,7 @@
 
 > **Deterministic Resource Consumption for Kubernetes Reliability Testing**
 
+[![Repository](https://img.shields.io/badge/repo-k8s--stressor--pod-purple)](https://github.com/luiscamaral/k8s-stressor-pod)
 [![Author](https://img.shields.io/badge/author-Luis%20Amaral-blue)](https://github.com/luiscamaral)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange)](https://www.rust-lang.org/)
@@ -110,7 +111,7 @@ curl -X POST http://stressor:8080/mode \
 # Configure CPU stress
 curl -X POST http://stressor:8080/cpu \
   -H "Content-Type: application/json" \
-  -d '{"mode":"linear","max_value":2000,"start_value":100,"growth_rate":50,"duration":120,"interval":10}'
+  -d '{"mode":"linear","max_value":2000,"start_value":100,"growth_rate":50,"midpoint_ms":60000,"interval":10}'
 
 # Get current status
 curl http://stressor:8080/status
@@ -141,6 +142,18 @@ Validate that evictions respect your PDB configurations during voluntary disrupt
 
 ## Quick Start
 
+### Prerequisites
+
+```bash
+# Install Rust 1.75 via mise (recommended)
+mise install
+
+# Or use rustup
+rustup install 1.75
+```
+
+### Local Development
+
 ```bash
 # Build
 cargo build --release
@@ -151,6 +164,47 @@ cargo run
 # Test endpoints
 curl http://localhost:8080/health
 curl http://localhost:8080/status
+```
+
+### Container (Docker/Nerdctl)
+
+```bash
+# Build and start with compose
+docker compose up --build -d
+# Or with nerdctl
+nerdctl compose up --build -d
+
+# View logs
+docker compose logs -f
+
+# Stop
+docker compose down
+```
+
+### Testing
+
+```bash
+# Run unit tests
+cargo test
+
+# Run integration tests (start container first)
+./scripts/test-phase1.sh   # API foundation tests
+./scripts/test-phase2.sh   # Stressor engine tests
+
+# Specify custom URL
+./scripts/test-phase2.sh http://localhost:8080
+```
+
+### Code Coverage
+
+```bash
+# Install coverage tool (one-time)
+cargo install cargo-llvm-cov@0.6.15 --locked
+
+# Run coverage
+./scripts/coverage.sh summary   # Terminal summary
+./scripts/coverage.sh html      # HTML report (opens browser)
+./scripts/coverage.sh lcov      # LCOV format for CI
 ```
 
 For implementation details, see [`generated/implementation-plan-version-1.md`](generated/implementation-plan-version-1.md).
