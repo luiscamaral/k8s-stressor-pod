@@ -27,41 +27,70 @@ pub struct AppContext {
     pub metrics: Arc<OrchestratorMetrics>,
 }
 
-/// Response for status endpoint
+/// Response for status endpoint - runtime status only
 #[derive(Serialize, ToSchema)]
 pub struct StatusResponse {
     /// Current operation mode
     pub mode: OperationMode,
     /// Configuration version counter
     pub config_version: u64,
-    /// CPU stressor configuration
-    pub cpu_config: CpuConfig,
-    /// Memory stressor configuration
-    pub memory_config: MemoryConfig,
-    /// Network stressor configuration
-    pub network_config: NetworkConfig,
+    /// Whether a stressor is currently active
+    pub is_active: bool,
 }
 
-/// Health check endpoint
+/// Response for health/ready endpoints
+#[derive(Serialize, ToSchema)]
+pub struct HealthResponse {
+    /// Health status
+    pub status: String,
+    /// Application version
+    pub version: String,
+}
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Liveness probe - indicates the service is running
 #[utoipa::path(
     get,
     path = "/health",
     tag = "Health",
     responses(
-        (status = 200, description = "Service is healthy", body = String)
+        (status = 200, description = "Service is alive", body = HealthResponse)
     )
 )]
-pub async fn health() -> &'static str {
-    "OK"
+pub async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "healthy".to_string(),
+        version: VERSION.to_string(),
+    })
 }
 
-/// Get current status and configuration
+/// Readiness probe - indicates the service is ready to accept traffic
+#[utoipa::path(
+    get,
+    path = "/ready",
+    tag = "Health",
+    responses(
+        (status = 200, description = "Service is ready", body = HealthResponse),
+        (status = 503, description = "Service is not ready")
+    )
+)]
+pub async fn ready(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    // Check if we can acquire the state lock (service is responsive)
+    let _state = ctx.state.read().await;
+    Json(HealthResponse {
+        status: "ready".to_string(),
+        version: VERSION.to_string(),
+    })
+}
+
+/// Get current runtime status
 #[utoipa::path(
     get,
     path = "/status",
     tag = "Status",
     responses(
-        (status = 200, description = "Current stressor status", body = StatusResponse)
+        (status = 200, description = "Current runtime status", body = StatusResponse)
     )
 )]
 pub async fn get_status(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
@@ -69,10 +98,22 @@ pub async fn get_status(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse
     Json(StatusResponse {
         mode: s.current_mode.clone(),
         config_version: s.config_version,
-        cpu_config: s.cpu_config.clone(),
-        memory_config: s.memory_config.clone(),
-        network_config: s.network_config.clone(),
+        is_active: s.current_mode != OperationMode::Idle,
     })
+}
+
+/// Get current operation mode
+#[utoipa::path(
+    get,
+    path = "/mode",
+    tag = "Control",
+    responses(
+        (status = 200, description = "Current operation mode", body = OperationMode)
+    )
+)]
+pub async fn get_mode(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let s = ctx.state.read().await;
+    Json(s.current_mode.clone())
 }
 
 /// Get Prometheus metrics
@@ -154,12 +195,12 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
 
 /// Set operation mode
 #[utoipa::path(
-    post,
+    put,
     path = "/mode",
     tag = "Control",
     request_body = OperationMode,
     responses(
-        (status = 200, description = "Mode updated successfully")
+        (status = 200, description = "Mode updated successfully", body = OperationMode)
     )
 )]
 pub async fn set_mode(
@@ -168,17 +209,31 @@ pub async fn set_mode(
 ) -> impl IntoResponse {
     let mut s = ctx.state.write().await;
     tracing::info!("Mode change: {:?} -> {:?}", s.current_mode, mode);
-    s.current_mode = mode;
+    s.current_mode = mode.clone();
     s.bump_version();
-    StatusCode::OK
+    Json(mode)
 }
 
-/// Configure CPU stressor
+/// Get CPU stressor configuration
 #[utoipa::path(
-    post,
-    path = "/cpu",
+    get,
+    path = "/config/cpu",
     tag = "Configuration",
-    request_body(content = CpuConfig, description = "CPU stressor settings", 
+    responses(
+        (status = 200, description = "Current CPU configuration", body = CpuConfig)
+    )
+)]
+pub async fn get_cpu_config(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let s = ctx.state.read().await;
+    Json(s.cpu_config.clone())
+}
+
+/// Set CPU stressor configuration
+#[utoipa::path(
+    put,
+    path = "/config/cpu",
+    tag = "Configuration",
+    request_body(content = CpuConfig, description = "CPU stressor settings",
         example = json!({
             "mode": "linear",
             "max_value": 1000,
@@ -189,27 +244,41 @@ pub async fn set_mode(
         })
     ),
     responses(
-        (status = 200, description = "CPU configuration updated"),
+        (status = 200, description = "CPU configuration updated", body = CpuConfig),
         (status = 400, description = "Invalid configuration")
     )
 )]
 pub async fn set_cpu_config(
     State(ctx): State<Arc<AppContext>>,
     Json(config): Json<CpuConfig>,
-) -> Result<StatusCode, AppError> {
+) -> Result<Json<CpuConfig>, AppError> {
     config.validate().map_err(AppError::InvalidConfig)?;
 
     let mut s = ctx.state.write().await;
     tracing::info!("CPU config updated: {:?}", config);
-    s.cpu_config = config;
+    s.cpu_config = config.clone();
     s.bump_version();
-    Ok(StatusCode::OK)
+    Ok(Json(config))
 }
 
-/// Configure memory stressor
+/// Get memory stressor configuration
 #[utoipa::path(
-    post,
-    path = "/memory",
+    get,
+    path = "/config/memory",
+    tag = "Configuration",
+    responses(
+        (status = 200, description = "Current memory configuration", body = MemoryConfig)
+    )
+)]
+pub async fn get_memory_config(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let s = ctx.state.read().await;
+    Json(s.memory_config.clone())
+}
+
+/// Set memory stressor configuration
+#[utoipa::path(
+    put,
+    path = "/config/memory",
     tag = "Configuration",
     request_body(content = MemoryConfig, description = "Memory stressor settings",
         example = json!({
@@ -222,27 +291,41 @@ pub async fn set_cpu_config(
         })
     ),
     responses(
-        (status = 200, description = "Memory configuration updated"),
+        (status = 200, description = "Memory configuration updated", body = MemoryConfig),
         (status = 400, description = "Invalid configuration")
     )
 )]
 pub async fn set_memory_config(
     State(ctx): State<Arc<AppContext>>,
     Json(config): Json<MemoryConfig>,
-) -> Result<StatusCode, AppError> {
+) -> Result<Json<MemoryConfig>, AppError> {
     config.validate().map_err(AppError::InvalidConfig)?;
 
     let mut s = ctx.state.write().await;
     tracing::info!("Memory config updated: {:?}", config);
-    s.memory_config = config;
+    s.memory_config = config.clone();
     s.bump_version();
-    Ok(StatusCode::OK)
+    Ok(Json(config))
 }
 
-/// Configure network stressor
+/// Get network stressor configuration
 #[utoipa::path(
-    post,
-    path = "/network",
+    get,
+    path = "/config/network",
+    tag = "Configuration",
+    responses(
+        (status = 200, description = "Current network configuration", body = NetworkConfig)
+    )
+)]
+pub async fn get_network_config(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let s = ctx.state.read().await;
+    Json(s.network_config.clone())
+}
+
+/// Set network stressor configuration
+#[utoipa::path(
+    put,
+    path = "/config/network",
     tag = "Configuration",
     request_body(content = NetworkConfig, description = "Network stressor settings",
         example = json!({
@@ -254,30 +337,30 @@ pub async fn set_memory_config(
         })
     ),
     responses(
-        (status = 200, description = "Network configuration updated"),
+        (status = 200, description = "Network configuration updated", body = NetworkConfig),
         (status = 400, description = "Invalid configuration")
     )
 )]
 pub async fn set_network_config(
     State(ctx): State<Arc<AppContext>>,
     Json(config): Json<NetworkConfig>,
-) -> Result<StatusCode, AppError> {
+) -> Result<Json<NetworkConfig>, AppError> {
     config.validate().map_err(AppError::InvalidConfig)?;
 
     let mut s = ctx.state.write().await;
     tracing::info!("Network config updated: {:?}", config);
-    s.network_config = config;
+    s.network_config = config.clone();
     s.bump_version();
-    Ok(StatusCode::OK)
+    Ok(Json(config))
 }
 
 /// Stop all stressors and reset to idle
 #[utoipa::path(
-    post,
+    put,
     path = "/stop",
     tag = "Control",
     responses(
-        (status = 200, description = "All stressors stopped")
+        (status = 200, description = "All stressors stopped", body = StatusResponse)
     )
 )]
 pub async fn stop_all(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
@@ -285,5 +368,9 @@ pub async fn stop_all(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
     tracing::info!("Stopping all stressors");
     s.current_mode = OperationMode::Idle;
     s.bump_version();
-    StatusCode::OK
+    Json(StatusResponse {
+        mode: OperationMode::Idle,
+        config_version: s.config_version,
+        is_active: false,
+    })
 }
