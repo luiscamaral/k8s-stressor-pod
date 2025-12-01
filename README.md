@@ -2,6 +2,7 @@
 
 > **Deterministic Resource Consumption for Kubernetes Reliability Testing**
 
+[![Repository](https://img.shields.io/badge/repo-k8s--stressor--pod-purple)](https://github.com/luiscamaral/k8s-stressor-pod)
 [![Author](https://img.shields.io/badge/author-Luis%20Amaral-blue)](https://github.com/luiscamaral)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange)](https://www.rust-lang.org/)
