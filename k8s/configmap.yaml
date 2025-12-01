@@ -1,0 +1,69 @@
+# Copyright (c) 2024 Luis Amaral
+# Author: Luis Amaral
+# Created: 2024-11-28
+#
+# NOTE: This ConfigMap provides reference configurations.
+# The application accepts runtime configuration via its REST API:
+#   PUT /config/cpu    - Configure CPU stressor
+#   PUT /config/memory - Configure memory stressor
+#   PUT /config/network - Configure network stressor
+#   PUT /mode          - Set operation mode
+#
+# These configurations are NOT automatically loaded by the pod.
+# Use them as templates for curl commands or init containers.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-stressor-config
+  labels:
+    app.kubernetes.io/name: k8s-stressor
+    app.kubernetes.io/component: stressor
+data:
+  # CPU stressor configuration
+  # Modes: linear, burst, s-curve
+  # max_value: Maximum CPU in millicores (1000 = 1 core)
+  # start_value: Initial CPU in millicores
+  # growth_rate: Rate of increase per interval
+  # midpoint_ms: Midpoint for s-curve (ms) or duration for burst
+  # interval: Adjustment interval in seconds
+  cpu-config.json: |
+    {
+      "mode": "linear",
+      "max_value": 1000,
+      "start_value": 100,
+      "growth_rate": 50,
+      "midpoint_ms": 30000,
+      "interval": 10
+    }
+
+  # Memory stressor configuration
+  # target_mb: Target memory allocation in MB
+  # start_mb: Initial memory allocation in MB
+  # growth_rate: Rate of increase per interval
+  # midpoint_ms: Midpoint for s-curve (ms)
+  # interval: Adjustment interval in seconds
+  memory-config.json: |
+    {
+      "mode": "linear",
+      "target_mb": 256,
+      "start_mb": 0,
+      "growth_rate": 10,
+      "midpoint_ms": 30000,
+      "interval": 10
+    }
+
+  # Network stressor configuration
+  # endpoint: Target URL for requests
+  # protocol: http or tcp
+  # connections: Number of concurrent connections
+  # midpoint_ms: Midpoint for connection ramp
+  # interval: Request interval in seconds
+  network-config.json: |
+    {
+      "endpoint": "http://localhost:8080/health",
+      "protocol": "http",
+      "connections": 10,
+      "midpoint_ms": 30000,
+      "interval": 5
+    }

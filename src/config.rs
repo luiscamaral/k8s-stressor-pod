@@ -22,7 +22,7 @@ pub enum OperationMode {
 }
 
 /// Load curve profile for stressors.
-/// 
+///
 /// All modes cycle: ramp → hold → ramp-down → interval rest → repeat
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -37,7 +37,7 @@ pub enum CurveMode {
 }
 
 /// CPU stressor configuration.
-/// 
+///
 /// Cycle: ramp up → hold at max (until midpoint) → ramp down → rest at start_value for interval.
 /// Cycles repeat until stopped via API.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
@@ -46,24 +46,24 @@ pub struct CpuConfig {
     /// Curve type: linear, burst, or s-curve
     #[schema(default = "linear")]
     pub mode: CurveMode,
-    
+
     /// Maximum CPU load in milli-cores (e.g., 2000 = 2 full cores). Default: 1000
     #[schema(default = 1000, minimum = 1)]
     pub max_value: u32,
-    
+
     /// Starting/minimum CPU load in milli-cores. Default: 100
     #[schema(default = 100, minimum = 0)]
     pub start_value: u32,
-    
+
     /// Load change rate in milli-cores per second (Linear/S-Curve). Default: 100
     #[schema(default = 100, minimum = 1)]
     pub growth_rate: u32,
-    
+
     /// Midpoint time in milliseconds. Peak is reached at midpoint, then ramp down begins.
     /// For Burst: duration at max before dropping. Default: 30000 (30s)
     #[schema(default = 30000, minimum = 1000)]
     pub midpoint_ms: u32,
-    
+
     /// Rest interval at start_value between cycles, in seconds. Default: 10
     #[schema(default = 10, minimum = 0)]
     pub interval: u64,
@@ -99,13 +99,13 @@ impl CpuConfig {
         }
         Ok(())
     }
-    
+
     /// Calculate ramp duration based on growth_rate
     pub fn ramp_duration_ms(&self) -> u64 {
         let delta = (self.max_value - self.start_value) as u64;
         (delta * 1000) / self.growth_rate as u64
     }
-    
+
     /// Calculate total cycle duration (ramp up + hold + ramp down + interval)
     pub fn cycle_duration_ms(&self) -> u64 {
         // midpoint_ms is when ramp down starts
@@ -116,7 +116,7 @@ impl CpuConfig {
 }
 
 /// Memory stressor configuration.
-/// 
+///
 /// Follows the same curve behavior as CPU: ramp up → hold at max → ramp down → rest.
 /// Memory allocation grows/shrinks following the selected curve mode.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
@@ -125,24 +125,24 @@ pub struct MemoryConfig {
     /// Curve type: linear, burst, or s-curve. Default: linear
     #[schema(default = "linear")]
     pub mode: CurveMode,
-    
+
     /// Target/maximum memory allocation in MB. Default: 256
     #[schema(default = 256, minimum = 1)]
     pub target_mb: u32,
-    
+
     /// Starting/minimum memory allocation in MB. Default: 0
     #[schema(default = 0, minimum = 0)]
     pub start_mb: u32,
-    
+
     /// Allocation change rate in MB per second (Linear/S-Curve). Default: 10
     #[schema(default = 10, minimum = 1)]
     pub growth_rate: u32,
-    
+
     /// Midpoint time in milliseconds. Peak allocation at midpoint, then deallocation begins.
     /// For Burst: duration at max before releasing. Default: 30000 (30s)
     #[schema(default = 30000, minimum = 1000)]
     pub midpoint_ms: u32,
-    
+
     /// Rest interval at start_mb between cycles, in seconds. Default: 10
     #[schema(default = 10, minimum = 0)]
     pub interval: u64,
@@ -177,7 +177,7 @@ impl MemoryConfig {
         }
         Ok(())
     }
-    
+
     /// Calculate ramp duration based on growth_rate
     pub fn ramp_duration_ms(&self) -> u64 {
         let delta = (self.target_mb - self.start_mb) as u64;
@@ -186,7 +186,7 @@ impl MemoryConfig {
 }
 
 /// Network stressor configuration.
-/// 
+///
 /// Network stressor floods connections to target endpoint.
 /// Uses midpoint for active duration, then rests for interval.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
@@ -195,19 +195,19 @@ pub struct NetworkConfig {
     /// Target endpoint URL. Default: http://localhost:8080/health
     #[schema(default = "http://localhost:8080/health")]
     pub endpoint: String,
-    
+
     /// Protocol: http, tcp, udp. Default: http
     #[schema(default = "http")]
     pub protocol: String,
-    
+
     /// Number of concurrent connections. Default: 10
     #[schema(default = 10, minimum = 1)]
     pub connections: u32,
-    
+
     /// Active duration in milliseconds (floods for this duration). Default: 30000 (30s)
     #[schema(default = 30000, minimum = 1000)]
     pub midpoint_ms: u32,
-    
+
     /// Rest interval between cycles, in seconds. Default: 10
     #[schema(default = 10, minimum = 0)]
     pub interval: u64,

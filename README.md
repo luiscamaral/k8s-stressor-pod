@@ -104,12 +104,12 @@ Lightweight HTTP listener for dynamic control without redeployment:
 
 ```bash
 # Set operation mode
-curl -X POST http://stressor:8080/mode \
+curl -X PUT http://stressor:8080/mode \
   -H "Content-Type: application/json" \
   -d '"cpu-stressor"'
 
 # Configure CPU stress
-curl -X POST http://stressor:8080/cpu \
+curl -X PUT http://stressor:8080/config/cpu \
   -H "Content-Type: application/json" \
   -d '{"mode":"linear","max_value":2000,"start_value":100,"growth_rate":50,"midpoint_ms":60000,"interval":10}'
 
@@ -117,7 +117,7 @@ curl -X POST http://stressor:8080/cpu \
 curl http://stressor:8080/status
 
 # Stop all stressors
-curl -X POST http://stressor:8080/stop
+curl -X PUT http://stressor:8080/stop
 ```
 
 ### Phase 3: Chaos & Lifecycle *(The "Resilience" Update)*
@@ -190,9 +190,10 @@ cargo test
 # Run integration tests (start container first)
 ./scripts/test-phase1.sh   # API foundation tests
 ./scripts/test-phase2.sh   # Stressor engine tests
+./scripts/test-phase3.sh   # Prometheus metrics and production tests
 
 # Specify custom URL
-./scripts/test-phase2.sh http://localhost:8080
+./scripts/test-phase3.sh http://localhost:8080
 ```
 
 ### Code Coverage
@@ -216,13 +217,62 @@ For implementation details, see [`generated/implementation-plan-version-1.md`](g
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Liveness probe |
-| `GET` | `/status` | Current mode and configuration |
+| `GET` | `/ready` | Readiness probe |
+| `GET` | `/status` | Runtime status (mode, config_version, is_active) |
 | `GET` | `/metrics` | Prometheus-format metrics |
-| `POST` | `/mode` | Set operation mode |
-| `POST` | `/cpu` | Configure CPU stressor |
-| `POST` | `/memory` | Configure memory stressor |
-| `POST` | `/network` | Configure network stressor |
-| `POST` | `/stop` | Stop all stressors |
+| `GET` | `/mode` | Get current operation mode |
+| `PUT` | `/mode` | Set operation mode |
+| `GET` | `/config/cpu` | Get CPU configuration |
+| `PUT` | `/config/cpu` | Configure CPU stressor |
+| `GET` | `/config/memory` | Get memory configuration |
+| `PUT` | `/config/memory` | Configure memory stressor |
+| `GET` | `/config/network` | Get network configuration |
+| `PUT` | `/config/network` | Configure network stressor |
+| `PUT` | `/stop` | Stop all stressors |
+
+Interactive API documentation available at `/swagger-ui/`.
+
+---
+
+## Kubernetes Deployment
+
+Kubernetes manifests are provided in the `k8s/` directory:
+
+```bash
+# Deploy to cluster
+kubectl apply -f k8s/
+
+# Check deployment status
+kubectl get pods -l app.kubernetes.io/name=k8s-stressor
+
+# View logs
+kubectl logs -l app.kubernetes.io/name=k8s-stressor -f
+
+# Access the API (port-forward)
+kubectl port-forward svc/k8s-stressor 8080:8080
+```
+
+The deployment includes:
+- **Prometheus annotations** for automatic metrics scraping
+- **Security context** with non-root user, read-only filesystem, and dropped capabilities
+- **Resource limits** (100m-4000m CPU, 128Mi-2Gi memory)
+- **Liveness and readiness probes**
+
+---
+
+## CI/CD
+
+The project includes a GitHub Actions workflow (`.github/workflows/ci.yml`) that runs on push to `main`/`develop` branches and pull requests.
+
+**Pipeline stages:**
+1. **Lint** - `cargo fmt` and `cargo clippy`
+2. **Test** - Unit tests in debug and release mode
+3. **Build** - Docker image build with BuildKit caching
+4. **Integration** - Run all integration test scripts
+5. **Security** - Trivy vulnerability scanning
+6. **K8s Validation** - Validate Kubernetes manifests
+
+Container images are published to `ghcr.io/luiscamaral/k8s-stressor-pod`.
 
 ---
 

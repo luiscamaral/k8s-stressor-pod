@@ -10,10 +10,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 use crate::config::OperationMode;
-use crate::engines::{
-    cpu, memory, network,
-    CpuHandle, MemoryHandle, NetworkHandle,
-};
+use crate::engines::{cpu, memory, network, CpuHandle, MemoryHandle, NetworkHandle};
 use crate::state::SharedState;
 
 /// Aggregated metrics from all engines
@@ -178,12 +175,22 @@ impl Orchestrator {
 
     /// Reset all metrics to zero
     fn reset_metrics(&self) {
-        self.metrics.cpu_target_millicores.store(0, Ordering::Relaxed);
+        self.metrics
+            .cpu_target_millicores
+            .store(0, Ordering::Relaxed);
         self.metrics.cpu_active_threads.store(0, Ordering::Relaxed);
         self.metrics.memory_target_bytes.store(0, Ordering::Relaxed);
-        self.metrics.memory_allocated_bytes.store(0, Ordering::Relaxed);
-        self.metrics.network_active_connections.store(0, Ordering::Relaxed);
-        self.metrics.network_requests_total.store(0, Ordering::Relaxed);
-        self.metrics.network_errors_total.store(0, Ordering::Relaxed);
+        self.metrics
+            .memory_allocated_bytes
+            .store(0, Ordering::Relaxed);
+        self.metrics
+            .network_active_connections
+            .store(0, Ordering::Relaxed);
+        self.metrics
+            .network_requests_total
+            .store(0, Ordering::Relaxed);
+        self.metrics
+            .network_errors_total
+            .store(0, Ordering::Relaxed);
     }
 }

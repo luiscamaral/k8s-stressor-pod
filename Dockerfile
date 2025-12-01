@@ -30,7 +30,7 @@ LABEL org.opencontainers.image.source="https://github.com/luiscamaral/k8s-stress
 LABEL org.opencontainers.image.description="k8s-stressor - Kubernetes reliability testing"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.authors="Luis Amaral"
-LABEL org.opencontainers.image.version="0.2.0"
+LABEL org.opencontainers.image.version="0.3.0"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
