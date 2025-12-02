@@ -1,0 +1,33 @@
+# Copyright (c) 2024 Luis Amaral
+# Author: Luis Amaral
+# Created: 2024-12-02
+# Runtime-only Dockerfile - expects pre-built binary at ./target/release/k8s-stressor
+# Usage: cargo build --release && docker build -f Dockerfile.runtime .
+
+FROM debian:bookworm-slim
+
+LABEL org.opencontainers.image.source="https://github.com/luiscamaral/k8s-stressor-pod"
+LABEL org.opencontainers.image.description="k8s-stressor - Kubernetes reliability testing"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.authors="Luis Amaral"
+LABEL org.opencontainers.image.version="0.3.0"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 1000 -s /bin/false stressor
+
+# Binary must be pre-built for the target architecture
+COPY target/release/k8s-stressor /usr/local/bin/
+
+USER 1000
+
+EXPOSE 8080
+
+ENV RUST_LOG=info
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["k8s-stressor"]
