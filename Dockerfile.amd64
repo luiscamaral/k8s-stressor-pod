@@ -1,0 +1,67 @@
+# Copyright (c) 2024 Luis Amaral
+# Author: Luis Amaral
+# Created: 2024-12-02
+# Cross-compilation Dockerfile for amd64 target from arm64 host
+
+# Build stage - uses host architecture with cross-compilation
+FROM --platform=$BUILDPLATFORM rust:1.75-slim-bookworm AS builder
+
+ARG TARGETARCH
+
+WORKDIR /app
+
+# Install cross-compilation toolchain
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    gcc-x86-64-linux-gnu \
+    libc6-dev-amd64-cross \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add the x86_64 target
+RUN rustup target add x86_64-unknown-linux-gnu
+
+# Configure cargo for cross-compilation
+RUN mkdir -p .cargo && \
+    echo '[target.x86_64-unknown-linux-gnu]' > .cargo/config.toml && \
+    echo 'linker = "x86_64-linux-gnu-gcc"' >> .cargo/config.toml
+
+# Cache dependencies
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir -p src/api && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "" > src/lib.rs && \
+    cargo build --release --target x86_64-unknown-linux-gnu 2>/dev/null || true && \
+    rm -rf src
+
+# Build application
+COPY src ./src
+RUN touch src/main.rs src/lib.rs && \
+    cargo build --release --target x86_64-unknown-linux-gnu
+
+# Runtime stage - amd64 target
+FROM --platform=linux/amd64 debian:bookworm-slim
+
+LABEL org.opencontainers.image.source="https://github.com/luiscamaral/k8s-stressor-pod"
+LABEL org.opencontainers.image.description="k8s-stressor - Kubernetes reliability testing"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.authors="Luis Amaral"
+LABEL org.opencontainers.image.version="0.3.0"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 1000 -s /bin/false stressor
+
+COPY --from=builder /app/target/x86_64-unknown-linux-gnu/release/k8s-stressor /usr/local/bin/
+
+USER 1000
+
+EXPOSE 8080
+
+ENV RUST_LOG=info
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["k8s-stressor"]
