@@ -274,6 +274,14 @@ The project includes a GitHub Actions workflow (`.github/workflows/ci.yml`) that
 
 Container images are published to `ghcr.io/luiscamaral/k8s-stressor-pod`.
 
+For detailed build and release documentation, see [`docs/build-and-release.md`](docs/build-and-release.md).
+
+---
+
+## Contributing
+
+We welcome contributions! Please see [`CONTRIBUTING.md`](CONTRIBUTING.md) for guidelines.
+
 ---
 
 ## Author

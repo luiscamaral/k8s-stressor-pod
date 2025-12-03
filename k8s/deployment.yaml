@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: stressor
-        image: ghcr.io/luiscamaral/k8s-stressor-pod:latest
+        image: 506741563541.dkr.ecr.us-east-1.amazonaws.com/k8s-stressor:0.3.0
         imagePullPolicy: Always
         ports:
         - name: http
@@ -51,7 +51,7 @@ spec:
             memory: "128Mi"
           limits:
             cpu: "4000m"
-            memory: "2Gi"
+            memory: "32Gi"
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
