@@ -10,6 +10,43 @@ use std::time::{Duration, Instant};
 
 use crate::config::{CurveMode, MemoryConfig};
 
+const BLOCK_SIZE_BYTES: usize = 4 * 1024 * 1024; // 4 MiB blocks
+const PAGE_SIZE_BYTES: usize = 4096; // 4 KiB pages
+
+struct XorShift64 {
+    state: u64,
+}
+
+impl XorShift64 {
+    fn new(seed: u64) -> Self {
+        Self { state: seed | 1 }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.state = x;
+        x
+    }
+
+    fn fill_bytes(&mut self, buf: &mut [u8]) {
+        let mut i = 0;
+        let len = buf.len();
+        while i + 8 <= len {
+            let v = self.next_u64().to_le_bytes();
+            buf[i..i + 8].copy_from_slice(&v);
+            i += 8;
+        }
+        if i < len {
+            let v = self.next_u64().to_le_bytes();
+            let remaining = len - i;
+            buf[i..].copy_from_slice(&v[..remaining]);
+        }
+    }
+}
+
 /// Metrics from memory stressor
 #[derive(Debug, Default)]
 pub struct MemoryMetrics {
@@ -92,16 +129,24 @@ fn memory_worker(config: MemoryConfig, stop: Arc<AtomicBool>, metrics: Arc<Memor
 
     tracing::debug!("Memory worker started, ramp_duration={}ms", ramp_ms);
 
-    // Pre-allocate maximum capacity
-    let mut data: Vec<u8> = Vec::with_capacity(target_bytes);
+    let mut rng = XorShift64::new(0x9E37_79B9_7F4A_7C15);
+    let mut blocks: Vec<Vec<u8>> = Vec::new();
+    let mut current_alloc: usize = 0;
 
-    // Initialize to start_mb
-    for i in 0..start_bytes {
-        data.push((i % 256) as u8);
+    // Initialize to start_mb if configured
+    if start_bytes > 0 {
+        adjust_allocation(
+            &mut blocks,
+            &mut current_alloc,
+            start_bytes,
+            &mut rng,
+            &stop,
+        );
     }
+
     metrics
         .allocated_bytes
-        .store(start_bytes as u64, Ordering::Relaxed);
+        .store(current_alloc as u64, Ordering::Relaxed);
 
     let mut cycle_start = Instant::now();
     let mut cycle_count: u64 = 0;
@@ -128,42 +173,21 @@ fn memory_worker(config: MemoryConfig, stop: Arc<AtomicBool>, metrics: Arc<Memor
             ramp_ms,
         );
 
-        let current_alloc = data.len();
-
-        // Adjust allocation using match for comparison chain
-        match target_alloc.cmp(&current_alloc) {
-            std::cmp::Ordering::Greater => {
-                // Grow: allocate more memory
-                let to_add = target_alloc - current_alloc;
-                for i in 0..to_add {
-                    if stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    data.push(((current_alloc + i) % 256) as u8);
-                }
-            }
-            std::cmp::Ordering::Less => {
-                // Shrink: deallocate memory
-                data.truncate(target_alloc);
-                data.shrink_to_fit();
-            }
-            std::cmp::Ordering::Equal => {
-                // No change needed
-            }
-        }
+        adjust_allocation(
+            &mut blocks,
+            &mut current_alloc,
+            target_alloc,
+            &mut rng,
+            &stop,
+        );
 
         // Update metrics
         metrics
             .allocated_bytes
-            .store(data.len() as u64, Ordering::Relaxed);
+            .store(current_alloc as u64, Ordering::Relaxed);
 
-        // Touch memory to prevent swap-out (every 4KB)
-        for i in (0..data.len()).step_by(4096) {
-            if stop.load(Ordering::Relaxed) {
-                break;
-            }
-            data[i] = data[i].wrapping_add(1);
-        }
+        // Touch memory pages to keep them resident (every 4KB)
+        touch_pages(&mut blocks, &stop);
 
         // Small sleep to avoid tight loop
         thread::sleep(Duration::from_millis(100));
@@ -171,9 +195,87 @@ fn memory_worker(config: MemoryConfig, stop: Arc<AtomicBool>, metrics: Arc<Memor
 
     tracing::info!(
         "Memory stressor stopped, releasing {}MB",
-        data.len() / (1024 * 1024)
+        current_alloc / (1024 * 1024)
     );
     metrics.allocated_bytes.store(0, Ordering::SeqCst);
+}
+
+fn adjust_allocation(
+    blocks: &mut Vec<Vec<u8>>,
+    current_alloc: &mut usize,
+    target_alloc: usize,
+    rng: &mut XorShift64,
+    stop: &Arc<AtomicBool>,
+) {
+    if target_alloc == *current_alloc {
+        return;
+    }
+
+    if target_alloc > *current_alloc {
+        let mut remaining = target_alloc - *current_alloc;
+
+        // First try to grow the last block up to BLOCK_SIZE_BYTES
+        if let Some(last) = blocks.last_mut() {
+            let available = BLOCK_SIZE_BYTES.saturating_sub(last.len());
+            if available > 0 {
+                let grow = remaining.min(available);
+                let old_len = last.len();
+                last.resize(old_len + grow, 0);
+                rng.fill_bytes(&mut last[old_len..]);
+                *current_alloc += grow;
+                remaining -= grow;
+            }
+        }
+
+        // Allocate additional blocks as needed
+        while remaining > 0 && !stop.load(Ordering::Relaxed) {
+            let block_len = remaining.min(BLOCK_SIZE_BYTES);
+            let mut block = Vec::with_capacity(BLOCK_SIZE_BYTES);
+            block.resize(block_len, 0);
+            rng.fill_bytes(&mut block[..]);
+            *current_alloc += block_len;
+            remaining -= block_len;
+            blocks.push(block);
+        }
+    } else {
+        // Shrink: deallocate from the end, dropping full blocks when possible
+        let mut excess = *current_alloc - target_alloc;
+
+        while excess > 0 {
+            if let Some(last) = blocks.last_mut() {
+                if excess >= last.len() {
+                    excess -= last.len();
+                    *current_alloc -= last.len();
+                    blocks.pop();
+                } else {
+                    let new_len = last.len() - excess;
+                    last.truncate(new_len);
+                    *current_alloc -= excess;
+                    excess = 0;
+                }
+            } else {
+                // Nothing left to free
+                *current_alloc = 0;
+                break;
+            }
+        }
+    }
+}
+
+fn touch_pages(blocks: &mut [Vec<u8>], stop: &Arc<AtomicBool>) {
+    for block in blocks.iter_mut() {
+        let len = block.len();
+        if len == 0 {
+            continue;
+        }
+
+        for i in (0..len).step_by(PAGE_SIZE_BYTES) {
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            block[i] = block[i].wrapping_add(1);
+        }
+    }
 }
 
 /// Calculate target memory allocation based on cycle position

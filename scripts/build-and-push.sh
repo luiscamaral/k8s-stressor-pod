@@ -3,27 +3,37 @@
 # Author: Luis Amaral
 # Created: 2024-12-02
 #
-# Two-phase Docker build script for k8s-stressor
-# Phase 1: Cross-compile Rust binary for x86_64
-# Phase 2: Package into Docker image and push to ECR
+# Docker build script for k8s-stressor
+# All compilation happens inside Docker using the multi-stage Dockerfile.
 #
 # Usage:
-#   ./scripts/build-and-push.sh                    # Build and push with default settings
+#   ./scripts/build-and-push.sh                    # Build for native arch, push to ECR
 #   ./scripts/build-and-push.sh --skip-push        # Build only, don't push
+#   ./scripts/build-and-push.sh --multi-arch       # Build for amd64+arm64 (may use QEMU)
 #   ./scripts/build-and-push.sh --tag v1.0.0       # Use custom tag
+#
+# Note: Multi-arch builds use CI (GitHub Actions) for reliability.
+#       Local builds default to native architecture to avoid QEMU issues.
 
 set -euo pipefail
+
+# Detect host architecture
+case "$(uname -m)" in
+    x86_64)        HOST_PLATFORM="linux/amd64" ;;
+    aarch64|arm64) HOST_PLATFORM="linux/arm64" ;;
+    *)             HOST_PLATFORM="linux/amd64" ;;
+esac
 
 # Configuration
 ECR_REGISTRY="${ECR_REGISTRY:-506741563541.dkr.ecr.us-east-1.amazonaws.com}"
 ECR_REPO="${ECR_REPO:-k8s-stressor}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-TARGET="${TARGET:-x86_64-unknown-linux-musl}"
 VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
 
 # Parse arguments
 SKIP_PUSH=false
 CUSTOM_TAG=""
+MULTI_ARCH=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -35,12 +45,26 @@ while [[ $# -gt 0 ]]; do
             CUSTOM_TAG="$2"
             shift 2
             ;;
+        --multi-arch)
+            MULTI_ARCH=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
+            echo "Usage: $0 [--skip-push] [--tag TAG] [--multi-arch]"
             exit 1
             ;;
     esac
 done
+
+# Set platforms based on flags and environment
+if [[ -n "${PLATFORMS:-}" ]]; then
+    BUILD_PLATFORMS="${PLATFORMS}"
+elif [[ "${MULTI_ARCH}" == "true" ]]; then
+    BUILD_PLATFORMS="linux/amd64,linux/arm64"
+else
+    BUILD_PLATFORMS="${HOST_PLATFORM}"
+fi
 
 TAG="${CUSTOM_TAG:-$VERSION}"
 IMAGE="${ECR_REGISTRY}/${ECR_REPO}"
@@ -48,59 +72,27 @@ IMAGE="${ECR_REGISTRY}/${ECR_REPO}"
 echo "=== k8s-stressor Build & Push ==="
 echo "Version: ${VERSION}"
 echo "Tag: ${TAG}"
-echo "Target: ${TARGET}"
+echo "Host arch: ${HOST_PLATFORM}"
+echo "Platforms: ${BUILD_PLATFORMS}"
 echo "Image: ${IMAGE}"
 echo ""
 
-# Phase 1: Build binary
-echo "=== Phase 1: Building Rust binary for ${TARGET} ==="
-
-# Check if cross is available (preferred for cross-compilation)
-if command -v cross &> /dev/null; then
-    echo "Using 'cross' for cross-compilation..."
-    cross build --release --target "${TARGET}"
-else
-    # Fallback: check if target is installed
-    if rustup target list --installed | grep -q "${TARGET}"; then
-        echo "Using 'cargo' with target ${TARGET}..."
-        cargo build --release --target "${TARGET}"
-    else
-        echo "Error: Neither 'cross' nor target '${TARGET}' is available."
-        echo ""
-        echo "Options:"
-        echo "  1. Install cross: cargo install cross"
-        echo "  2. Add target: rustup target add ${TARGET}"
-        echo "  3. Run in CI with native x86_64 runner"
-        exit 1
-    fi
+# Warn about QEMU emulation for cross-arch builds
+if [[ "${BUILD_PLATFORMS}" == *","* ]] || [[ "${BUILD_PLATFORMS}" != "${HOST_PLATFORM}" ]]; then
+    echo "⚠️  Warning: Building for non-native architecture may use QEMU emulation."
+    echo "   Rust compilation under QEMU can be slow or fail."
+    echo "   For reliable multi-arch builds, use CI (GitHub Actions)."
+    echo ""
 fi
 
-BINARY_PATH="target/${TARGET}/release/k8s-stressor"
-if [[ ! -f "${BINARY_PATH}" ]]; then
-    echo "Error: Binary not found at ${BINARY_PATH}"
-    exit 1
-fi
+echo "=== Phase 1: Building Docker image (inside Docker) ==="
 
-echo "Binary built: ${BINARY_PATH}"
-file "${BINARY_PATH}"
-echo ""
-
-# Phase 2: Build Docker image
-echo "=== Phase 2: Building Docker image ==="
-
-# Create temp directory with binary for Docker context
-DOCKER_CONTEXT=$(mktemp -d)
-trap "rm -rf ${DOCKER_CONTEXT}" EXIT
-
-mkdir -p "${DOCKER_CONTEXT}/target/release"
-cp "${BINARY_PATH}" "${DOCKER_CONTEXT}/target/release/k8s-stressor"
-cp Dockerfile.runtime "${DOCKER_CONTEXT}/Dockerfile"
-
-# Build image
-nerdctl build --platform linux/amd64 \
+# Build image using the main multi-stage Dockerfile
+nerdctl build \
+    --platform "${BUILD_PLATFORMS}" \
     -t "${IMAGE}:${TAG}" \
     -t "${IMAGE}:latest" \
-    "${DOCKER_CONTEXT}"
+    .
 
 echo ""
 echo "Image built: ${IMAGE}:${TAG}"
@@ -111,9 +103,9 @@ if [[ "${SKIP_PUSH}" == "true" ]]; then
     exit 0
 fi
 
-# Phase 3: Push to ECR
+# Phase 2: Push to ECR
 echo ""
-echo "=== Phase 3: Pushing to ECR ==="
+echo "=== Phase 2: Pushing to ECR ==="
 
 # Authenticate with ECR
 echo "Authenticating with ECR..."
