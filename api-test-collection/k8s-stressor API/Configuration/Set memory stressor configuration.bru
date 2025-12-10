@@ -1,0 +1,103 @@
+meta {
+  name: Set memory stressor configuration
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/config/memory
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "mode": "linear",
+    "target_mb": 5256,
+    "start_mb": 256,
+    "growth_rate": 256,
+    "midpoint_ms": 90000,
+    "interval": 5
+  }
+}
+
+example {
+  name: 200 Response
+  description: Memory configuration updated
+  
+  request: {
+    url: {{baseUrl}}/config/memory
+    method: PUT
+    mode: json
+    body:json: {
+      {
+        "growth_rate": 10,
+        "interval": 10,
+        "midpoint_ms": 30000,
+        "mode": "linear",
+        "start_mb": 0,
+        "target_mb": 256
+      }
+    }
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "growth_rate": 0,
+          "interval": 0,
+          "midpoint_ms": 0,
+          "mode": "",
+          "start_mb": 0,
+          "target_mb": 0
+        }
+      '''
+    }
+  }
+}
+
+example {
+  name: 400 Response
+  description: Invalid configuration
+  
+  request: {
+    url: {{baseUrl}}/config/memory
+    method: PUT
+    mode: json
+    body:json: {
+      {
+        "growth_rate": 10,
+        "interval": 10,
+        "midpoint_ms": 30000,
+        "mode": "linear",
+        "start_mb": 0,
+        "target_mb": 256
+      }
+    }
+  }
+  
+  response: {
+    status: {
+      code: 400
+      text: Bad Request
+    }
+  
+    body: {
+      type: text
+      content: '''
+  
+      '''
+    }
+  }
+}

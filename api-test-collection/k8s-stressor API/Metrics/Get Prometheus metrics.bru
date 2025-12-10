@@ -1,0 +1,36 @@
+meta {
+  name: Get Prometheus metrics
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/metrics
+  body: none
+  auth: inherit
+}
+
+example {
+  name: 200 Response
+  description: Prometheus format metrics
+  
+  request: {
+    url: {{baseUrl}}/metrics
+    method: GET
+    mode: none
+  }
+  
+  response: {
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: text
+      content: '''
+  
+      '''
+    }
+  }
+}

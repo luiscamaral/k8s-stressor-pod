@@ -243,6 +243,51 @@ impl NetworkConfig {
     }
 }
 
+/// Chaos/lifecycle simulation configuration.
+///
+/// Controls probe failure simulation and graceful shutdown behavior
+/// for testing Kubernetes lifecycle handling.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(default)]
+pub struct ChaosConfig {
+    /// When true, /health endpoint returns 503 to simulate liveness probe failure.
+    /// Kubernetes will restart the pod based on livenessProbe configuration.
+    #[schema(default = false)]
+    pub fail_liveness: bool,
+
+    /// When true, /ready endpoint returns 503 to simulate readiness probe failure.
+    /// Kubernetes will remove the pod from service endpoints.
+    #[schema(default = false)]
+    pub fail_readiness: bool,
+
+    /// Delay in seconds before honoring SIGTERM shutdown signal.
+    /// Simulates "zombie" pods that don't terminate promptly.
+    /// Use to test terminationGracePeriodSeconds configuration.
+    /// 0 = immediate shutdown (default behavior).
+    #[schema(default = 0, minimum = 0, maximum = 300)]
+    pub termination_delay_seconds: u32,
+}
+
+impl Default for ChaosConfig {
+    fn default() -> Self {
+        Self {
+            fail_liveness: false,
+            fail_readiness: false,
+            termination_delay_seconds: 0,
+        }
+    }
+}
+
+impl ChaosConfig {
+    /// Validate chaos configuration values
+    pub fn validate(&self) -> Result<(), String> {
+        if self.termination_delay_seconds > 300 {
+            return Err("termination_delay_seconds cannot exceed 300 seconds".to_string());
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +423,40 @@ mod tests {
         let mode = CurveMode::SCurve;
         let json = serde_json::to_string(&mode).unwrap();
         assert_eq!(json, "\"s-curve\"");
+    }
+
+    #[test]
+    fn test_chaos_config_default() {
+        let config = ChaosConfig::default();
+        assert!(!config.fail_liveness);
+        assert!(!config.fail_readiness);
+        assert_eq!(config.termination_delay_seconds, 0);
+    }
+
+    #[test]
+    fn test_chaos_config_validation() {
+        let valid = ChaosConfig::default();
+        assert!(valid.validate().is_ok());
+
+        let invalid = ChaosConfig {
+            termination_delay_seconds: 301,
+            ..Default::default()
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_chaos_config_serialization() {
+        let config = ChaosConfig {
+            fail_liveness: true,
+            fail_readiness: false,
+            termination_delay_seconds: 30,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"fail_liveness\":true"));
+        assert!(json.contains("\"termination_delay_seconds\":30"));
+
+        let deserialized: ChaosConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, config);
     }
 }

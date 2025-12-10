@@ -1,0 +1,40 @@
+meta {
+  name: Set operation mode
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{baseUrl}}/mode
+  body: json
+  auth: inherit
+}
+
+example {
+  name: 200 Response
+  description: Mode updated successfully
+  
+  request: {
+    url: {{baseUrl}}/mode
+    method: PUT
+    mode: json
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+  
+      '''
+    }
+  }
+}

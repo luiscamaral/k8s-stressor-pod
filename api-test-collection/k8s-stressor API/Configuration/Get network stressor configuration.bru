@@ -1,0 +1,46 @@
+meta {
+  name: Get network stressor configuration
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/config/network
+  body: none
+  auth: inherit
+}
+
+example {
+  name: 200 Response
+  description: Current network configuration
+  
+  request: {
+    url: {{baseUrl}}/config/network
+    method: GET
+    mode: none
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "connections": 0,
+          "endpoint": "",
+          "interval": 0,
+          "midpoint_ms": 0,
+          "protocol": ""
+        }
+      '''
+    }
+  }
+}

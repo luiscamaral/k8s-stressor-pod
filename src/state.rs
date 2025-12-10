@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::config::{CpuConfig, MemoryConfig, NetworkConfig, OperationMode};
+use crate::config::{ChaosConfig, CpuConfig, MemoryConfig, NetworkConfig, OperationMode};
 
 /// Shared application state
 #[derive(Clone, Debug)]
@@ -15,6 +15,8 @@ pub struct AppState {
     pub cpu_config: CpuConfig,
     pub memory_config: MemoryConfig,
     pub network_config: NetworkConfig,
+    /// Chaos/lifecycle simulation configuration
+    pub chaos_config: ChaosConfig,
     /// Incremented on every config change
     pub config_version: u64,
 }
@@ -26,6 +28,7 @@ impl Default for AppState {
             cpu_config: CpuConfig::default(),
             memory_config: MemoryConfig::default(),
             network_config: NetworkConfig::default(),
+            chaos_config: ChaosConfig::default(),
             config_version: 0,
         }
     }

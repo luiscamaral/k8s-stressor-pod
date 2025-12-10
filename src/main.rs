@@ -17,7 +17,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use k8s_stressor::api::handlers::{self, AppContext, HealthResponse, StatusResponse};
-use k8s_stressor::config::{CpuConfig, CurveMode, MemoryConfig, NetworkConfig, OperationMode};
+use k8s_stressor::config::{ChaosConfig, CpuConfig, CurveMode, MemoryConfig, NetworkConfig, OperationMode};
 use k8s_stressor::orchestrator::Orchestrator;
 use k8s_stressor::state::create_shared_state;
 
@@ -45,6 +45,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         handlers::set_memory_config,
         handlers::get_network_config,
         handlers::set_network_config,
+        handlers::get_chaos_config,
+        handlers::set_chaos_config,
         handlers::stop_all,
     ),
     components(schemas(
@@ -55,6 +57,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         CpuConfig,
         MemoryConfig,
         NetworkConfig,
+        ChaosConfig,
     )),
     tags(
         (name = "Health", description = "Health check endpoints"),
@@ -62,6 +65,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         (name = "Metrics", description = "Prometheus metrics"),
         (name = "Control", description = "Stressor control endpoints"),
         (name = "Configuration", description = "Stressor configuration endpoints"),
+        (name = "Chaos", description = "Chaos/lifecycle simulation endpoints"),
     )
 )]
 struct ApiDoc;
@@ -120,6 +124,10 @@ async fn main() {
             "/config/network",
             get(handlers::get_network_config).put(handlers::set_network_config),
         )
+        .route(
+            "/config/chaos",
+            get(handlers::get_chaos_config).put(handlers::set_chaos_config),
+        )
         // Stop control
         .route("/stop", put(handlers::stop_all))
         .layer(TraceLayer::new_for_http())
@@ -144,12 +152,34 @@ async fn main() {
             }
         }
         _ = tokio::signal::ctrl_c() => {
-            tracing::info!("Received shutdown signal");
-            let _ = shutdown_tx.send(true);
+            tracing::info!("Received shutdown signal (SIGINT)");
+            handle_graceful_shutdown(&state, &shutdown_tx).await;
         }
     }
 
     // Wait for orchestrator to finish
     let _ = orchestrator_handle.await;
     tracing::info!("Shutdown complete");
+}
+
+/// Handle graceful shutdown with optional termination delay (zombie mode)
+async fn handle_graceful_shutdown(
+    state: &k8s_stressor::state::SharedState,
+    shutdown_tx: &watch::Sender<bool>,
+) {
+    let delay_seconds = {
+        let s = state.read().await;
+        s.chaos_config.termination_delay_seconds
+    };
+
+    if delay_seconds > 0 {
+        tracing::warn!(
+            "Chaos mode: delaying shutdown for {} seconds (zombie mode)",
+            delay_seconds
+        );
+        tokio::time::sleep(std::time::Duration::from_secs(delay_seconds as u64)).await;
+        tracing::info!("Termination delay complete, proceeding with shutdown");
+    }
+
+    let _ = shutdown_tx.send(true);
 }

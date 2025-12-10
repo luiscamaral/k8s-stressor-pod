@@ -1,0 +1,47 @@
+meta {
+  name: Get memory stressor configuration
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/config/memory
+  body: none
+  auth: inherit
+}
+
+example {
+  name: 200 Response
+  description: Current memory configuration
+  
+  request: {
+    url: {{baseUrl}}/config/memory
+    method: GET
+    mode: none
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "growth_rate": 0,
+          "interval": 0,
+          "midpoint_ms": 0,
+          "mode": "",
+          "start_mb": 0,
+          "target_mb": 0
+        }
+      '''
+    }
+  }
+}

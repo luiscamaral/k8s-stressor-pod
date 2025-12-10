@@ -1,0 +1,68 @@
+meta {
+  name: Readiness probe - indicates the service is ready to accept traffic
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/ready
+  body: none
+  auth: inherit
+}
+
+example {
+  name: 200 Response
+  description: Service is ready
+  
+  request: {
+    url: {{baseUrl}}/ready
+    method: GET
+    mode: none
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "status": "",
+          "version": ""
+        }
+      '''
+    }
+  }
+}
+
+example {
+  name: 503 Response
+  description: Service is not ready
+  
+  request: {
+    url: {{baseUrl}}/ready
+    method: GET
+    mode: none
+  }
+  
+  response: {
+    status: {
+      code: 503
+      text: Service Unavailable
+    }
+  
+    body: {
+      type: text
+      content: '''
+  
+      '''
+    }
+  }
+}

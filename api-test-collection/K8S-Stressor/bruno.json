@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "K8S-Stressor",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

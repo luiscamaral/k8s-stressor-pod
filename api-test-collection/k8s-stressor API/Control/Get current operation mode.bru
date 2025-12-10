@@ -1,0 +1,40 @@
+meta {
+  name: Get current operation mode
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/mode
+  body: none
+  auth: inherit
+}
+
+example {
+  name: 200 Response
+  description: Current operation mode
+  
+  request: {
+    url: {{baseUrl}}/mode
+    method: GET
+    mode: none
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+  
+      '''
+    }
+  }
+}

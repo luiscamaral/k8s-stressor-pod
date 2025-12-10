@@ -1,0 +1,103 @@
+meta {
+  name: Set CPU stressor configuration
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{baseUrl}}/config/cpu
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "growth_rate": 0,
+    "interval": 0,
+    "max_value": 0,
+    "midpoint_ms": 0,
+    "mode": "",
+    "start_value": 0
+  }
+}
+
+example {
+  name: 200 Response
+  description: CPU configuration updated
+  
+  request: {
+    url: {{baseUrl}}/config/cpu
+    method: PUT
+    mode: json
+    body:json: {
+      {
+        "growth_rate": 100,
+        "interval": 10,
+        "max_value": 1000,
+        "midpoint_ms": 30000,
+        "mode": "linear",
+        "start_value": 100
+      }
+    }
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "growth_rate": 0,
+          "interval": 0,
+          "max_value": 0,
+          "midpoint_ms": 0,
+          "mode": "",
+          "start_value": 0
+        }
+      '''
+    }
+  }
+}
+
+example {
+  name: 400 Response
+  description: Invalid configuration
+  
+  request: {
+    url: {{baseUrl}}/config/cpu
+    method: PUT
+    mode: json
+    body:json: {
+      {
+        "growth_rate": 100,
+        "interval": 10,
+        "max_value": 1000,
+        "midpoint_ms": 30000,
+        "mode": "linear",
+        "start_value": 100
+      }
+    }
+  }
+  
+  response: {
+    status: {
+      code: 400
+      text: Bad Request
+    }
+  
+    body: {
+      type: text
+      content: '''
+  
+      '''
+    }
+  }
+}

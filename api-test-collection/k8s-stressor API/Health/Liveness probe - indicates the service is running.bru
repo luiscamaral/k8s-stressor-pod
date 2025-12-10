@@ -1,0 +1,43 @@
+meta {
+  name: Liveness probe - indicates the service is running
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/health
+  body: none
+  auth: inherit
+}
+
+example {
+  name: 200 Response
+  description: Service is alive
+  
+  request: {
+    url: {{baseUrl}}/health
+    method: GET
+    mode: none
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "status": "",
+          "version": ""
+        }
+      '''
+    }
+  }
+}

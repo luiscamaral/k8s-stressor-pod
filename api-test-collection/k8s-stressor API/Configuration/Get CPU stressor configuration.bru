@@ -1,0 +1,47 @@
+meta {
+  name: Get CPU stressor configuration
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/config/cpu
+  body: none
+  auth: inherit
+}
+
+example {
+  name: 200 Response
+  description: Current CPU configuration
+  
+  request: {
+    url: {{baseUrl}}/config/cpu
+    method: GET
+    mode: none
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "growth_rate": 0,
+          "interval": 0,
+          "max_value": 0,
+          "midpoint_ms": 0,
+          "mode": "",
+          "start_value": 0
+        }
+      '''
+    }
+  }
+}

@@ -10,7 +10,7 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::config::{CpuConfig, MemoryConfig, NetworkConfig, OperationMode};
+use crate::config::{ChaosConfig, CpuConfig, MemoryConfig, NetworkConfig, OperationMode};
 use crate::error::AppError;
 use crate::orchestrator::OrchestratorMetrics;
 use crate::state::SharedState;
@@ -45,38 +45,63 @@ pub struct HealthResponse {
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Liveness probe - indicates the service is running
+/// Returns 503 if chaos.fail_liveness is enabled
 #[utoipa::path(
     get,
     path = "/health",
     tag = "Health",
     responses(
-        (status = 200, description = "Service is alive", body = HealthResponse)
+        (status = 200, description = "Service is alive", body = HealthResponse),
+        (status = 503, description = "Simulated liveness failure (chaos mode)")
     )
 )]
-pub async fn health() -> Json<HealthResponse> {
+pub async fn health(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let s = ctx.state.read().await;
+    if s.chaos_config.fail_liveness {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(HealthResponse {
+                status: "unhealthy (chaos: fail_liveness enabled)".to_string(),
+                version: VERSION.to_string(),
+            }),
+        )
+            .into_response();
+    }
     Json(HealthResponse {
         status: "healthy".to_string(),
         version: VERSION.to_string(),
     })
+    .into_response()
 }
 
 /// Readiness probe - indicates the service is ready to accept traffic
+/// Returns 503 if chaos.fail_readiness is enabled
 #[utoipa::path(
     get,
     path = "/ready",
     tag = "Health",
     responses(
         (status = 200, description = "Service is ready", body = HealthResponse),
-        (status = 503, description = "Service is not ready")
+        (status = 503, description = "Service is not ready or chaos mode active")
     )
 )]
 pub async fn ready(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
-    // Check if we can acquire the state lock (service is responsive)
-    let _state = ctx.state.read().await;
+    let s = ctx.state.read().await;
+    if s.chaos_config.fail_readiness {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(HealthResponse {
+                status: "not ready (chaos: fail_readiness enabled)".to_string(),
+                version: VERSION.to_string(),
+            }),
+        )
+            .into_response();
+    }
     Json(HealthResponse {
         status: "ready".to_string(),
         version: VERSION.to_string(),
     })
+    .into_response()
 }
 
 /// Get current runtime status
@@ -375,4 +400,53 @@ pub async fn stop_all(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
         config_version: s.config_version,
         is_active: false,
     })
+}
+
+/// Get chaos/lifecycle configuration
+#[utoipa::path(
+    get,
+    path = "/config/chaos",
+    tag = "Chaos",
+    responses(
+        (status = 200, description = "Current chaos configuration", body = ChaosConfig)
+    )
+)]
+pub async fn get_chaos_config(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let s = ctx.state.read().await;
+    Json(s.chaos_config.clone())
+}
+
+/// Set chaos/lifecycle configuration
+///
+/// Controls probe failure simulation and graceful shutdown behavior.
+/// - `fail_liveness`: When true, /health returns 503 (triggers pod restart)
+/// - `fail_readiness`: When true, /ready returns 503 (removes from service)
+/// - `termination_delay_seconds`: Delay before honoring SIGTERM (zombie mode)
+#[utoipa::path(
+    put,
+    path = "/config/chaos",
+    tag = "Chaos",
+    request_body(content = ChaosConfig, description = "Chaos/lifecycle settings",
+        example = json!({
+            "fail_liveness": false,
+            "fail_readiness": false,
+            "termination_delay_seconds": 0
+        })
+    ),
+    responses(
+        (status = 200, description = "Chaos configuration updated", body = ChaosConfig),
+        (status = 400, description = "Invalid configuration")
+    )
+)]
+pub async fn set_chaos_config(
+    State(ctx): State<Arc<AppContext>>,
+    Json(config): Json<ChaosConfig>,
+) -> Result<Json<ChaosConfig>, AppError> {
+    config.validate().map_err(AppError::InvalidConfig)?;
+
+    let mut s = ctx.state.write().await;
+    tracing::info!("Chaos config updated: {:?}", config);
+    s.chaos_config = config.clone();
+    // Note: chaos config changes don't bump version as they don't affect stressor engines
+    Ok(Json(config))
 }

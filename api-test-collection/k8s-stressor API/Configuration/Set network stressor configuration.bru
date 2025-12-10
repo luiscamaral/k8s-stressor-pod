@@ -1,0 +1,99 @@
+meta {
+  name: Set network stressor configuration
+  type: http
+  seq: 6
+}
+
+put {
+  url: {{baseUrl}}/config/network
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "connections": 0,
+    "endpoint": "",
+    "interval": 0,
+    "midpoint_ms": 0,
+    "protocol": ""
+  }
+}
+
+example {
+  name: 200 Response
+  description: Network configuration updated
+  
+  request: {
+    url: {{baseUrl}}/config/network
+    method: PUT
+    mode: json
+    body:json: {
+      {
+        "connections": 10,
+        "endpoint": "http://localhost:8080/health",
+        "interval": 10,
+        "midpoint_ms": 30000,
+        "protocol": "http"
+      }
+    }
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "connections": 0,
+          "endpoint": "",
+          "interval": 0,
+          "midpoint_ms": 0,
+          "protocol": ""
+        }
+      '''
+    }
+  }
+}
+
+example {
+  name: 400 Response
+  description: Invalid configuration
+  
+  request: {
+    url: {{baseUrl}}/config/network
+    method: PUT
+    mode: json
+    body:json: {
+      {
+        "connections": 10,
+        "endpoint": "http://localhost:8080/health",
+        "interval": 10,
+        "midpoint_ms": 30000,
+        "protocol": "http"
+      }
+    }
+  }
+  
+  response: {
+    status: {
+      code: 400
+      text: Bad Request
+    }
+  
+    body: {
+      type: text
+      content: '''
+  
+      '''
+    }
+  }
+}
