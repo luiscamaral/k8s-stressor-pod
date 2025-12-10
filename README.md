@@ -236,31 +236,38 @@ For implementation details, see [`generated/implementation-plan-version-1.md`](g
 
 Interactive API documentation available at `/swagger-ui/`.
 
-### Disk I/O Stressor Example
+### Disk I/O Stressor Examples
+
+**Stress IOPS** (random access, database-like workloads):
 
 ```bash
-# Configure disk I/O stressor
+# High IOPS: 4KB blocks + random pattern = ~12,800 IOPS at 50 MB/s
 curl -X PUT http://localhost:8080/config/disk \
   -H "Content-Type: application/json" \
   -d '{
-    "mode": "linear",
     "target_mbps": 50,
-    "start_mbps": 10,
-    "pattern": "sequential",
-    "read_ratio": 0.5,
+    "pattern": "random",
     "block_size_kb": 4,
-    "max_file_size_mb": 512,
-    "midpoint_ms": 30000,
-    "interval": 10
+    "read_ratio": 0.7
   }'
 
-# Enable disk stressor
-curl -X PUT http://localhost:8080/mode \
-  -H "Content-Type: application/json" \
-  -d '"disk-stressor"'
+curl -X PUT http://localhost:8080/mode -H "Content-Type: application/json" -d '"disk-stressor"'
+```
 
-# Check disk metrics
-curl http://localhost:8080/metrics | grep disk
+**Stress Throughput** (sequential I/O, large file operations):
+
+```bash
+# High throughput: 256KB blocks + sequential pattern = ~400 IOPS at 100 MB/s
+curl -X PUT http://localhost:8080/config/disk \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_mbps": 100,
+    "pattern": "sequential",
+    "block_size_kb": 256,
+    "read_ratio": 0.5
+  }'
+
+curl -X PUT http://localhost:8080/mode -H "Content-Type: application/json" -d '"disk-stressor"'
 ```
 
 **Multi-volume testing:**
@@ -273,9 +280,12 @@ curl -X PUT http://localhost:8080/config/disk \
     "work_dir": "/tmp/k8s-stressor",
     "additional_paths": ["/mnt/fast-ssd", "/mnt/standard-hdd"],
     "target_mbps": 50,
-    "pattern": "random"
+    "pattern": "random",
+    "block_size_kb": 4
   }'
 ```
+
+**Key:** `Throughput (MB/s) = IOPS × Block Size (KB) / 1024`
 
 ---
 

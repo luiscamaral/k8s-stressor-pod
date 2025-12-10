@@ -70,6 +70,14 @@ data:
     }
 
   # Disk I/O stressor configuration
+  # 
+  # IOPS vs Throughput:
+  #   - IOPS (I/O Operations Per Second): Use small blocks (4-16KB) + random pattern
+  #     Example: 50 MB/s ÷ 4KB = ~12,800 IOPS (database workloads)
+  #   - Throughput (MB/s): Use large blocks (64-1024KB) + sequential pattern
+  #     Example: 400 IOPS × 256KB = 100 MB/s (file transfers)
+  #   - Formula: Throughput (MB/s) = IOPS × Block Size (KB) / 1024
+  #
   # target_mbps: Target I/O throughput in MB/s
   # start_mbps: Initial I/O throughput in MB/s
   # pattern: sequential or random
