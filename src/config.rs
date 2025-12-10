@@ -55,7 +55,7 @@ pub enum OperationMode {
 /// Load curve profile for stressors.
 ///
 /// All modes cycle: ramp → hold → ramp-down → interval rest → repeat
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CurveMode {
     /// Linear ramp up (growth_rate/sec) → hold at max → linear ramp down → rest at start

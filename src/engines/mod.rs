@@ -4,9 +4,11 @@
 // License: MIT
 
 pub mod cpu;
+pub mod disk;
 pub mod memory;
 pub mod network;
 
 pub use cpu::{start_cpu_stressor, CpuHandle, CpuMetrics};
+pub use disk::{start_disk_stressor, DiskHandle, DiskMetrics};
 pub use memory::{start_memory_stressor, MemoryHandle, MemoryMetrics};
 pub use network::{start_network_stressor, NetworkHandle, NetworkMetrics};
