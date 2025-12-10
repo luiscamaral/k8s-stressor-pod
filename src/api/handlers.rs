@@ -10,7 +10,7 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::config::{ChaosConfig, CpuConfig, MemoryConfig, NetworkConfig, OperationMode};
+use crate::config::{ChaosConfig, CpuConfig, DiskConfig, MemoryConfig, NetworkConfig, OperationMode};
 use crate::error::AppError;
 use crate::orchestrator::OrchestratorMetrics;
 use crate::state::SharedState;
@@ -474,5 +474,41 @@ pub async fn set_chaos_config(
     tracing::info!("Chaos config updated: {:?}", config);
     s.chaos_config = config.clone();
     // Note: chaos config changes don't bump version as they don't affect stressor engines
+    Ok(Json(config))
+}
+
+/// Get current disk I/O configuration
+#[utoipa::path(
+    get,
+    path = "/config/disk",
+    responses(
+        (status = 200, description = "Current disk I/O configuration", body = DiskConfig)
+    )
+)]
+pub async fn get_disk_config(State(ctx): State<Arc<AppContext>>) -> Json<DiskConfig> {
+    let s = ctx.state.read().await;
+    Json(s.disk_config.clone())
+}
+
+/// Update disk I/O configuration
+#[utoipa::path(
+    put,
+    path = "/config/disk",
+    request_body = DiskConfig,
+    responses(
+        (status = 200, description = "Disk I/O configuration updated", body = DiskConfig),
+        (status = 400, description = "Invalid configuration")
+    )
+)]
+pub async fn set_disk_config(
+    State(ctx): State<Arc<AppContext>>,
+    Json(config): Json<DiskConfig>,
+) -> Result<Json<DiskConfig>, AppError> {
+    config.validate().map_err(AppError::InvalidConfig)?;
+
+    let mut s = ctx.state.write().await;
+    tracing::info!("Disk config updated: {:?}", config);
+    s.disk_config = config.clone();
+    s.bump_version();
     Ok(Json(config))
 }

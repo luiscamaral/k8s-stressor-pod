@@ -17,7 +17,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use k8s_stressor::api::handlers::{self, AppContext, HealthResponse, StatusResponse};
-use k8s_stressor::config::{ChaosConfig, CpuConfig, CurveMode, MemoryConfig, NetworkConfig, OperationMode};
+use k8s_stressor::config::{ChaosConfig, CpuConfig, CurveMode, DiskConfig, IoPattern, MemoryConfig, NetworkConfig, OperationMode};
 use k8s_stressor::orchestrator::Orchestrator;
 use k8s_stressor::state::create_shared_state;
 
@@ -45,6 +45,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         handlers::set_memory_config,
         handlers::get_network_config,
         handlers::set_network_config,
+        handlers::get_disk_config,
+        handlers::set_disk_config,
         handlers::get_chaos_config,
         handlers::set_chaos_config,
         handlers::stop_all,
@@ -57,6 +59,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         CpuConfig,
         MemoryConfig,
         NetworkConfig,
+        DiskConfig,
+        IoPattern,
         ChaosConfig,
     )),
     tags(
@@ -123,6 +127,10 @@ async fn main() {
         .route(
             "/config/network",
             get(handlers::get_network_config).put(handlers::set_network_config),
+        )
+        .route(
+            "/config/disk",
+            get(handlers::get_disk_config).put(handlers::set_disk_config),
         )
         .route(
             "/config/chaos",
