@@ -11,7 +11,7 @@ metadata:
     app.kubernetes.io/component: stressor
     app.kubernetes.io/part-of: reliability-testing
     app.kubernetes.io/managed-by: kubectl
-    app.kubernetes.io/version: "0.3.0"
+    app.kubernetes.io/version: "0.4.0"
 spec:
   replicas: 1
   selector:
@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: stressor
-        image: 506741563541.dkr.ecr.us-east-1.amazonaws.com/k8s-stressor:0.3.0
+        image: ghcr.io/luiscamaral/k8s-stressor-pod:0.4.0
         imagePullPolicy: Always
         ports:
         - name: http
