@@ -4,10 +4,11 @@
 #
 # NOTE: This ConfigMap provides reference configurations.
 # The application accepts runtime configuration via its REST API:
-#   PUT /config/cpu    - Configure CPU stressor
-#   PUT /config/memory - Configure memory stressor
+#   PUT /config/cpu     - Configure CPU stressor
+#   PUT /config/memory  - Configure memory stressor
 #   PUT /config/network - Configure network stressor
-#   PUT /mode          - Set operation mode
+#   PUT /config/disk    - Configure disk I/O stressor
+#   PUT /mode           - Set operation mode
 #
 # These configurations are NOT automatically loaded by the pod.
 # Use them as templates for curl commands or init containers.
@@ -66,4 +67,30 @@ data:
       "connections": 10,
       "midpoint_ms": 30000,
       "interval": 5
+    }
+
+  # Disk I/O stressor configuration
+  # target_mbps: Target I/O throughput in MB/s
+  # start_mbps: Initial I/O throughput in MB/s
+  # pattern: sequential or random
+  # read_ratio: 0.0 = all writes, 1.0 = all reads
+  # block_size_kb: Block size for I/O operations (1-1024 KB)
+  # work_dir: Directory for temp files (default: /tmp/k8s-stressor)
+  # additional_paths: Additional volumes for multi-volume testing
+  # max_file_size_mb: Maximum file size in MB
+  # midpoint_ms: Midpoint for I/O ramp (ms)
+  # interval: Rest interval in seconds
+  disk-config.json: |
+    {
+      "mode": "linear",
+      "target_mbps": 50,
+      "start_mbps": 10,
+      "pattern": "sequential",
+      "read_ratio": 0.5,
+      "block_size_kb": 4,
+      "work_dir": "/tmp/k8s-stressor",
+      "additional_paths": [],
+      "max_file_size_mb": 512,
+      "midpoint_ms": 30000,
+      "interval": 10
     }

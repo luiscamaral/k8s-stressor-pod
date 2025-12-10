@@ -56,6 +56,9 @@ spec:
           limits:
             cpu: "4000m"
             memory: "32Gi"
+        volumeMounts:
+        - name: disk-scratch
+          mountPath: /tmp/k8s-stressor
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
@@ -78,3 +81,7 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 2
           failureThreshold: 3
+      volumes:
+      - name: disk-scratch
+        emptyDir:
+          sizeLimit: 2Gi

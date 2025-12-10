@@ -228,9 +228,54 @@ For implementation details, see [`generated/implementation-plan-version-1.md`](g
 | `PUT` | `/config/memory` | Configure memory stressor |
 | `GET` | `/config/network` | Get network configuration |
 | `PUT` | `/config/network` | Configure network stressor |
+| `GET` | `/config/disk` | Get disk I/O configuration |
+| `PUT` | `/config/disk` | Configure disk I/O stressor |
+| `GET` | `/config/chaos` | Get chaos/lifecycle configuration |
+| `PUT` | `/config/chaos` | Configure chaos/lifecycle simulation |
 | `PUT` | `/stop` | Stop all stressors |
 
 Interactive API documentation available at `/swagger-ui/`.
+
+### Disk I/O Stressor Example
+
+```bash
+# Configure disk I/O stressor
+curl -X PUT http://localhost:8080/config/disk \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "linear",
+    "target_mbps": 50,
+    "start_mbps": 10,
+    "pattern": "sequential",
+    "read_ratio": 0.5,
+    "block_size_kb": 4,
+    "max_file_size_mb": 512,
+    "midpoint_ms": 30000,
+    "interval": 10
+  }'
+
+# Enable disk stressor
+curl -X PUT http://localhost:8080/mode \
+  -H "Content-Type: application/json" \
+  -d '"disk-stressor"'
+
+# Check disk metrics
+curl http://localhost:8080/metrics | grep disk
+```
+
+**Multi-volume testing:**
+
+```bash
+# Test multiple storage classes simultaneously
+curl -X PUT http://localhost:8080/config/disk \
+  -H "Content-Type: application/json" \
+  -d '{
+    "work_dir": "/tmp/k8s-stressor",
+    "additional_paths": ["/mnt/fast-ssd", "/mnt/standard-hdd"],
+    "target_mbps": 50,
+    "pattern": "random"
+  }'
+```
 
 ---
 
