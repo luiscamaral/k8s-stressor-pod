@@ -18,6 +18,10 @@ pub mod safe_mode {
     pub const MAX_NETWORK_CONNECTIONS: u32 = 100;
     /// Maximum termination delay in seconds when safe mode is enabled
     pub const MAX_TERMINATION_DELAY: u32 = 60;
+    /// Maximum disk I/O throughput in MB/s when safe mode is enabled
+    pub const MAX_DISK_MBPS: u32 = 100;
+    /// Maximum file size in MB when safe mode is enabled
+    pub const MAX_DISK_FILE_SIZE_MB: u32 = 1024;
 }
 
 /// Check if safe mode is enabled via environment variable.
@@ -41,6 +45,8 @@ pub enum OperationMode {
     MemoryStressor,
     /// Network stress testing mode
     NetworkStressor,
+    /// Disk I/O stress testing mode
+    DiskStressor,
     /// No active stressor
     #[default]
     Idle,
@@ -355,6 +361,156 @@ impl ChaosConfig {
     }
 }
 
+/// I/O pattern for disk stressor
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum IoPattern {
+    /// Sequential I/O (linear read/write through file)
+    #[default]
+    Sequential,
+    /// Random I/O (random seek positions within file)
+    Random,
+}
+
+/// Disk I/O stressor configuration.
+///
+/// Generates controlled read/write load on specified paths.
+/// Supports multiple volumes for storage class comparison.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(default)]
+pub struct DiskConfig {
+    /// Curve type: linear, burst, or s-curve. Default: linear
+    #[schema(default = "linear")]
+    pub mode: CurveMode,
+
+    /// Target I/O throughput in MB/s. Default: 50
+    #[schema(default = 50, minimum = 1)]
+    pub target_mbps: u32,
+
+    /// Starting I/O throughput in MB/s. Default: 10
+    #[schema(default = 10, minimum = 1)]
+    pub start_mbps: u32,
+
+    /// I/O pattern: sequential or random. Default: sequential
+    #[schema(default = "sequential")]
+    pub pattern: IoPattern,
+
+    /// Read/write ratio (0.0 = all writes, 1.0 = all reads). Default: 0.5
+    #[schema(default = 0.5, minimum = 0.0, maximum = 1.0)]
+    pub read_ratio: f32,
+
+    /// Block size for I/O operations in KB. Default: 4 (4KB)
+    #[schema(default = 4, minimum = 1, maximum = 1024)]
+    pub block_size_kb: u32,
+
+    /// Working directory for temp files. Default: /tmp/k8s-stressor
+    /// Can be overridden to target specific volumes (PVCs, different storage classes)
+    #[schema(default = "/tmp/k8s-stressor")]
+    pub work_dir: String,
+
+    /// Additional work directories for multi-volume testing.
+    /// Each path will have its own temp file and I/O operations.
+    #[schema(default = "[]")]
+    pub additional_paths: Vec<String>,
+
+    /// Maximum file size in MB. Default: 512
+    #[schema(default = 512, minimum = 1)]
+    pub max_file_size_mb: u32,
+
+    /// Midpoint time in milliseconds. Default: 30000 (30s)
+    #[schema(default = 30000, minimum = 1000)]
+    pub midpoint_ms: u32,
+
+    /// Rest interval between cycles, in seconds. Default: 10
+    #[schema(default = 10, minimum = 0)]
+    pub interval: u64,
+}
+
+impl Default for DiskConfig {
+    fn default() -> Self {
+        Self {
+            mode: CurveMode::Linear,
+            target_mbps: 50,
+            start_mbps: 10,
+            pattern: IoPattern::Sequential,
+            read_ratio: 0.5,
+            block_size_kb: 4,
+            work_dir: std::env::var("STRESSOR_DISK_WORK_DIR")
+                .unwrap_or_else(|_| "/tmp/k8s-stressor".to_string()),
+            additional_paths: Vec::new(),
+            max_file_size_mb: 512,
+            midpoint_ms: 30000,
+            interval: 10,
+        }
+    }
+}
+
+impl DiskConfig {
+    /// Validate configuration values.
+    /// When safe mode is enabled, enforces maximum limits to prevent cluster damage.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.target_mbps == 0 {
+            return Err("target_mbps must be greater than 0".to_string());
+        }
+        if self.start_mbps > self.target_mbps {
+            return Err("start_mbps cannot exceed target_mbps".to_string());
+        }
+        if self.read_ratio < 0.0 || self.read_ratio > 1.0 {
+            return Err("read_ratio must be between 0.0 and 1.0".to_string());
+        }
+        if self.block_size_kb == 0 || self.block_size_kb > 1024 {
+            return Err("block_size_kb must be between 1 and 1024".to_string());
+        }
+        if self.work_dir.is_empty() {
+            return Err("work_dir cannot be empty".to_string());
+        }
+        if self.max_file_size_mb == 0 {
+            return Err("max_file_size_mb must be greater than 0".to_string());
+        }
+        if self.midpoint_ms < 1000 {
+            return Err("midpoint_ms must be at least 1000ms".to_string());
+        }
+
+        // Safe mode limits
+        if is_safe_mode_enabled() {
+            if self.target_mbps > safe_mode::MAX_DISK_MBPS {
+                return Err(format!(
+                    "target_mbps {} exceeds safe mode limit of {} MB/s. Set STRESSOR_SAFE_MODE=false to disable limits.",
+                    self.target_mbps, safe_mode::MAX_DISK_MBPS
+                ));
+            }
+            if self.max_file_size_mb > safe_mode::MAX_DISK_FILE_SIZE_MB {
+                return Err(format!(
+                    "max_file_size_mb {} exceeds safe mode limit of {} MB. Set STRESSOR_SAFE_MODE=false to disable limits.",
+                    self.max_file_size_mb, safe_mode::MAX_DISK_FILE_SIZE_MB
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get all paths (work_dir + additional_paths)
+    pub fn all_paths(&self) -> Vec<String> {
+        let mut paths = vec![self.work_dir.clone()];
+        paths.extend(self.additional_paths.clone());
+        paths
+    }
+
+    /// Calculate ramp duration based on growth rate (MB/s per second)
+    pub fn ramp_duration_ms(&self) -> u64 {
+        let delta = (self.target_mbps - self.start_mbps) as u64;
+        // Assume 10 MB/s growth rate per second
+        let growth_rate = 10;
+        (delta * 1000) / growth_rate
+    }
+
+    /// Calculate total cycle duration
+    pub fn cycle_duration_ms(&self) -> u64 {
+        (self.midpoint_ms as u64 * 2) + (self.interval * 1000)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,5 +690,80 @@ mod tests {
         assert_eq!(safe_mode::MAX_MEMORY_MB, 2048);
         assert_eq!(safe_mode::MAX_NETWORK_CONNECTIONS, 100);
         assert_eq!(safe_mode::MAX_TERMINATION_DELAY, 60);
+        assert_eq!(safe_mode::MAX_DISK_MBPS, 100);
+        assert_eq!(safe_mode::MAX_DISK_FILE_SIZE_MB, 1024);
+    }
+
+    #[test]
+    fn test_disk_config_default() {
+        let config = DiskConfig::default();
+        assert_eq!(config.mode, CurveMode::Linear);
+        assert_eq!(config.target_mbps, 50);
+        assert_eq!(config.start_mbps, 10);
+        assert_eq!(config.pattern, IoPattern::Sequential);
+        assert_eq!(config.read_ratio, 0.5);
+        assert_eq!(config.block_size_kb, 4);
+        assert_eq!(config.max_file_size_mb, 512);
+        assert_eq!(config.midpoint_ms, 30000);
+        assert_eq!(config.interval, 10);
+    }
+
+    #[test]
+    fn test_disk_config_validation() {
+        let valid = DiskConfig::default();
+        assert!(valid.validate().is_ok());
+
+        let invalid_target = DiskConfig {
+            target_mbps: 0,
+            ..Default::default()
+        };
+        assert!(invalid_target.validate().is_err());
+
+        let invalid_start = DiskConfig {
+            start_mbps: 100,
+            target_mbps: 50,
+            ..Default::default()
+        };
+        assert!(invalid_start.validate().is_err());
+
+        let invalid_ratio = DiskConfig {
+            read_ratio: 1.5,
+            ..Default::default()
+        };
+        assert!(invalid_ratio.validate().is_err());
+    }
+
+    #[test]
+    fn test_disk_config_all_paths() {
+        let config = DiskConfig {
+            work_dir: "/tmp/test".to_string(),
+            additional_paths: vec!["/mnt/ssd".to_string(), "/mnt/hdd".to_string()],
+            ..Default::default()
+        };
+        let paths = config.all_paths();
+        assert_eq!(paths.len(), 3);
+        assert_eq!(paths[0], "/tmp/test");
+        assert_eq!(paths[1], "/mnt/ssd");
+        assert_eq!(paths[2], "/mnt/hdd");
+    }
+
+    #[test]
+    fn test_io_pattern_serialization() {
+        let pattern = IoPattern::Random;
+        let json = serde_json::to_string(&pattern).unwrap();
+        assert_eq!(json, "\"random\"");
+
+        let deserialized: IoPattern = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, IoPattern::Random);
+    }
+
+    #[test]
+    fn test_operation_mode_disk_stressor() {
+        let mode = OperationMode::DiskStressor;
+        let json = serde_json::to_string(&mode).unwrap();
+        assert_eq!(json, "\"disk-stressor\"");
+
+        let deserialized: OperationMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, OperationMode::DiskStressor);
     }
 }

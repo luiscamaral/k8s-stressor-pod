@@ -104,6 +104,11 @@ impl Orchestrator {
                                 let handle = network::start_network_stressor(network_config);
                                 ActiveEngine::Network(handle)
                             }
+                            OperationMode::DiskStressor => {
+                                // TODO: Implement disk stressor in Step 2
+                                tracing::warn!("DiskStressor mode not yet implemented");
+                                ActiveEngine::None
+                            }
                             OperationMode::Idle => {
                                 tracing::info!("Mode set to Idle");
                                 ActiveEngine::None

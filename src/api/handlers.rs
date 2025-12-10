@@ -152,6 +152,7 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
         OperationMode::CpuStressor => 1,
         OperationMode::MemoryStressor => 2,
         OperationMode::NetworkStressor => 3,
+        OperationMode::DiskStressor => 4,
     };
 
     // Get metrics from orchestrator
