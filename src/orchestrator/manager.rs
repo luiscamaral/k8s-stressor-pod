@@ -10,7 +10,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 use crate::config::OperationMode;
-use crate::engines::{cpu, memory, network, CpuHandle, MemoryHandle, NetworkHandle};
+use crate::engines::{cpu, disk, memory, network, CpuHandle, DiskHandle, MemoryHandle, NetworkHandle};
 use crate::state::SharedState;
 
 /// Aggregated metrics from all engines
@@ -23,6 +23,11 @@ pub struct OrchestratorMetrics {
     pub network_active_connections: AtomicU64,
     pub network_requests_total: AtomicU64,
     pub network_errors_total: AtomicU64,
+    pub disk_target_mbps: AtomicU64,
+    pub disk_actual_mbps: AtomicU64,
+    pub disk_bytes_written: AtomicU64,
+    pub disk_bytes_read: AtomicU64,
+    pub disk_io_errors: AtomicU64,
 }
 
 /// Active engine handles
@@ -31,6 +36,7 @@ enum ActiveEngine {
     Cpu(CpuHandle),
     Memory(MemoryHandle),
     Network(NetworkHandle),
+    Disk(DiskHandle),
 }
 
 /// Orchestrator manages stressor lifecycle
@@ -77,6 +83,7 @@ impl Orchestrator {
                         let cpu_config = state.cpu_config.clone();
                         let memory_config = state.memory_config.clone();
                         let network_config = state.network_config.clone();
+                        let disk_config = state.disk_config.clone();
                         drop(state); // Release lock before spawning
 
                         // Stop existing engine
@@ -84,6 +91,7 @@ impl Orchestrator {
                             ActiveEngine::Cpu(handle) => handle.stop(),
                             ActiveEngine::Memory(handle) => handle.stop(),
                             ActiveEngine::Network(handle) => handle.stop(),
+                            ActiveEngine::Disk(handle) => handle.stop(),
                             ActiveEngine::None => {}
                         }
 
@@ -105,9 +113,9 @@ impl Orchestrator {
                                 ActiveEngine::Network(handle)
                             }
                             OperationMode::DiskStressor => {
-                                // TODO: Implement disk stressor in Step 2
-                                tracing::warn!("DiskStressor mode not yet implemented");
-                                ActiveEngine::None
+                                tracing::info!("Starting disk stressor");
+                                let handle = disk::start_disk_stressor(disk_config);
+                                ActiveEngine::Disk(handle)
                             }
                             OperationMode::Idle => {
                                 tracing::info!("Mode set to Idle");
@@ -125,6 +133,7 @@ impl Orchestrator {
                             ActiveEngine::Cpu(handle) => handle.stop(),
                             ActiveEngine::Memory(handle) => handle.stop(),
                             ActiveEngine::Network(handle) => handle.stop(),
+                            ActiveEngine::Disk(handle) => handle.stop(),
                             ActiveEngine::None => {}
                         }
 
@@ -174,6 +183,28 @@ impl Orchestrator {
                     Ordering::Relaxed,
                 );
             }
+            ActiveEngine::Disk(handle) => {
+                self.metrics.disk_target_mbps.store(
+                    handle.metrics.target_mbps.load(Ordering::Relaxed) as u64,
+                    Ordering::Relaxed,
+                );
+                self.metrics.disk_actual_mbps.store(
+                    handle.metrics.actual_mbps.load(Ordering::Relaxed) as u64,
+                    Ordering::Relaxed,
+                );
+                self.metrics.disk_bytes_written.store(
+                    handle.metrics.bytes_written.load(Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
+                self.metrics.disk_bytes_read.store(
+                    handle.metrics.bytes_read.load(Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
+                self.metrics.disk_io_errors.store(
+                    handle.metrics.io_errors.load(Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
+            }
             ActiveEngine::None => {}
         }
     }
@@ -197,5 +228,10 @@ impl Orchestrator {
         self.metrics
             .network_errors_total
             .store(0, Ordering::Relaxed);
+        self.metrics.disk_target_mbps.store(0, Ordering::Relaxed);
+        self.metrics.disk_actual_mbps.store(0, Ordering::Relaxed);
+        self.metrics.disk_bytes_written.store(0, Ordering::Relaxed);
+        self.metrics.disk_bytes_read.store(0, Ordering::Relaxed);
+        self.metrics.disk_io_errors.store(0, Ordering::Relaxed);
     }
 }

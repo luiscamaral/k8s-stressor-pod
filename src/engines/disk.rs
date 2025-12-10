@@ -38,6 +38,7 @@ impl DiskMetrics {
 
 /// Handle to control disk stressor
 pub struct DiskHandle {
+    pub metrics: Arc<DiskMetrics>,
     stop_flag: Arc<AtomicBool>,
     thread_handle: Option<JoinHandle<()>>,
 }
@@ -73,6 +74,7 @@ pub fn start_disk_stressor(config: DiskConfig) -> DiskHandle {
     });
 
     DiskHandle {
+        metrics,
         stop_flag,
         thread_handle: Some(thread_handle),
     }

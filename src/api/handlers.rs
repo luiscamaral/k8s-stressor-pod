@@ -166,9 +166,14 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
         .load(Ordering::Relaxed);
     let net_requests = ctx.metrics.network_requests_total.load(Ordering::Relaxed);
     let net_errors = ctx.metrics.network_errors_total.load(Ordering::Relaxed);
+    let disk_target_mbps = ctx.metrics.disk_target_mbps.load(Ordering::Relaxed);
+    let disk_actual_mbps = ctx.metrics.disk_actual_mbps.load(Ordering::Relaxed);
+    let disk_bytes_written = ctx.metrics.disk_bytes_written.load(Ordering::Relaxed);
+    let disk_bytes_read = ctx.metrics.disk_bytes_read.load(Ordering::Relaxed);
+    let disk_io_errors = ctx.metrics.disk_io_errors.load(Ordering::Relaxed);
 
     let body = format!(
-        "# HELP stressor_mode Current operation mode (0=idle, 1=cpu, 2=memory, 3=network)\n\
+        "# HELP stressor_mode Current operation mode (0=idle, 1=cpu, 2=memory, 3=network, 4=disk)\n\
          # TYPE stressor_mode gauge\n\
          stressor_mode {}\n\
          # HELP stressor_config_version Configuration version counter\n\
@@ -197,7 +202,22 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
          stressor_network_requests_total {}\n\
          # HELP stressor_network_errors_total Total network errors\n\
          # TYPE stressor_network_errors_total counter\n\
-         stressor_network_errors_total {}\n",
+         stressor_network_errors_total {}\n\
+         # HELP stressor_disk_target_mbps Target disk I/O throughput in MB/s\n\
+         # TYPE stressor_disk_target_mbps gauge\n\
+         stressor_disk_target_mbps {}\n\
+         # HELP stressor_disk_actual_mbps Actual disk I/O throughput in MB/s\n\
+         # TYPE stressor_disk_actual_mbps gauge\n\
+         stressor_disk_actual_mbps {}\n\
+         # HELP stressor_disk_bytes_written_total Total bytes written to disk\n\
+         # TYPE stressor_disk_bytes_written_total counter\n\
+         stressor_disk_bytes_written_total {}\n\
+         # HELP stressor_disk_bytes_read_total Total bytes read from disk\n\
+         # TYPE stressor_disk_bytes_read_total counter\n\
+         stressor_disk_bytes_read_total {}\n\
+         # HELP stressor_disk_io_errors_total Total disk I/O errors\n\
+         # TYPE stressor_disk_io_errors_total counter\n\
+         stressor_disk_io_errors_total {}\n",
         mode_num,
         s.config_version,
         if s.current_mode == OperationMode::Idle {
@@ -212,6 +232,11 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
         net_connections,
         net_requests,
         net_errors,
+        disk_target_mbps,
+        disk_actual_mbps,
+        disk_bytes_written,
+        disk_bytes_read,
+        disk_io_errors,
     );
 
     (
