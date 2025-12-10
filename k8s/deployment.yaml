@@ -45,6 +45,10 @@ spec:
           value: "info"
         - name: RUST_BACKTRACE
           value: "1"
+        # Safe mode limits resource consumption to prevent accidental cluster damage
+        # Set to "false" only in dedicated test clusters
+        - name: STRESSOR_SAFE_MODE
+          value: "true"
         resources:
           requests:
             cpu: "100m"

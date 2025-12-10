@@ -4,7 +4,32 @@
 // License: MIT
 
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use utoipa::ToSchema;
+
+/// Safe mode limits to prevent accidental cluster damage.
+/// These limits are enforced when STRESSOR_SAFE_MODE=true (default).
+pub mod safe_mode {
+    /// Maximum CPU in millicores when safe mode is enabled (2 cores)
+    pub const MAX_CPU_MILLICORES: u32 = 2000;
+    /// Maximum memory in MB when safe mode is enabled (2 GB)
+    pub const MAX_MEMORY_MB: u32 = 2048;
+    /// Maximum concurrent connections when safe mode is enabled
+    pub const MAX_NETWORK_CONNECTIONS: u32 = 100;
+    /// Maximum termination delay in seconds when safe mode is enabled
+    pub const MAX_TERMINATION_DELAY: u32 = 60;
+}
+
+/// Check if safe mode is enabled via environment variable.
+/// Default is true (safe mode ON) unless explicitly set to "false".
+pub fn is_safe_mode_enabled() -> bool {
+    static SAFE_MODE: OnceLock<bool> = OnceLock::new();
+    *SAFE_MODE.get_or_init(|| {
+        std::env::var("STRESSOR_SAFE_MODE")
+            .map(|v| !v.eq_ignore_ascii_case("false"))
+            .unwrap_or(true) // Default: safe mode enabled
+    })
+}
 
 /// Operation mode - only one active at a time
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -83,7 +108,8 @@ impl Default for CpuConfig {
 }
 
 impl CpuConfig {
-    /// Validate configuration values
+    /// Validate configuration values.
+    /// When safe mode is enabled, enforces maximum limits to prevent cluster damage.
     pub fn validate(&self) -> Result<(), String> {
         if self.max_value == 0 {
             return Err("max_value must be greater than 0".to_string());
@@ -97,6 +123,15 @@ impl CpuConfig {
         if self.growth_rate == 0 {
             return Err("growth_rate must be greater than 0".to_string());
         }
+
+        // Safe mode limits
+        if is_safe_mode_enabled() && self.max_value > safe_mode::MAX_CPU_MILLICORES {
+            return Err(format!(
+                "max_value {} exceeds safe mode limit of {} millicores. Set STRESSOR_SAFE_MODE=false to disable limits.",
+                self.max_value, safe_mode::MAX_CPU_MILLICORES
+            ));
+        }
+
         Ok(())
     }
 
@@ -162,6 +197,8 @@ impl Default for MemoryConfig {
 }
 
 impl MemoryConfig {
+    /// Validate configuration values.
+    /// When safe mode is enabled, enforces maximum limits to prevent cluster damage.
     pub fn validate(&self) -> Result<(), String> {
         if self.target_mb == 0 {
             return Err("target_mb must be greater than 0".to_string());
@@ -175,6 +212,15 @@ impl MemoryConfig {
         if self.growth_rate == 0 {
             return Err("growth_rate must be greater than 0".to_string());
         }
+
+        // Safe mode limits
+        if is_safe_mode_enabled() && self.target_mb > safe_mode::MAX_MEMORY_MB {
+            return Err(format!(
+                "target_mb {} exceeds safe mode limit of {} MB. Set STRESSOR_SAFE_MODE=false to disable limits.",
+                self.target_mb, safe_mode::MAX_MEMORY_MB
+            ));
+        }
+
         Ok(())
     }
 
@@ -226,6 +272,8 @@ impl Default for NetworkConfig {
 }
 
 impl NetworkConfig {
+    /// Validate configuration values.
+    /// When safe mode is enabled, enforces maximum limits to prevent cluster damage.
     pub fn validate(&self) -> Result<(), String> {
         if self.endpoint.is_empty() {
             return Err("endpoint cannot be empty".to_string());
@@ -239,6 +287,15 @@ impl NetworkConfig {
         if self.midpoint_ms < 1000 {
             return Err("midpoint_ms must be at least 1000ms".to_string());
         }
+
+        // Safe mode limits
+        if is_safe_mode_enabled() && self.connections > safe_mode::MAX_NETWORK_CONNECTIONS {
+            return Err(format!(
+                "connections {} exceeds safe mode limit of {}. Set STRESSOR_SAFE_MODE=false to disable limits.",
+                self.connections, safe_mode::MAX_NETWORK_CONNECTIONS
+            ));
+        }
+
         Ok(())
     }
 }
@@ -279,11 +336,21 @@ impl Default for ChaosConfig {
 }
 
 impl ChaosConfig {
-    /// Validate chaos configuration values
+    /// Validate chaos configuration values.
+    /// When safe mode is enabled, enforces maximum limits to prevent cluster damage.
     pub fn validate(&self) -> Result<(), String> {
         if self.termination_delay_seconds > 300 {
             return Err("termination_delay_seconds cannot exceed 300 seconds".to_string());
         }
+
+        // Safe mode limits
+        if is_safe_mode_enabled() && self.termination_delay_seconds > safe_mode::MAX_TERMINATION_DELAY {
+            return Err(format!(
+                "termination_delay_seconds {} exceeds safe mode limit of {} seconds. Set STRESSOR_SAFE_MODE=false to disable limits.",
+                self.termination_delay_seconds, safe_mode::MAX_TERMINATION_DELAY
+            ));
+        }
+
         Ok(())
     }
 }
@@ -458,5 +525,14 @@ mod tests {
 
         let deserialized: ChaosConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, config);
+    }
+
+    #[test]
+    fn test_safe_mode_limits() {
+        // Note: These tests verify the safe_mode module constants are defined correctly
+        assert_eq!(safe_mode::MAX_CPU_MILLICORES, 2000);
+        assert_eq!(safe_mode::MAX_MEMORY_MB, 2048);
+        assert_eq!(safe_mode::MAX_NETWORK_CONNECTIONS, 100);
+        assert_eq!(safe_mode::MAX_TERMINATION_DELAY, 60);
     }
 }
