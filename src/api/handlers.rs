@@ -158,19 +158,23 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
     // Get metrics from orchestrator
     let cpu_target = ctx.metrics.cpu_target_millicores.load(Ordering::Relaxed);
     let cpu_threads = ctx.metrics.cpu_active_threads.load(Ordering::Relaxed);
+    let cpu_cycles = ctx.metrics.cpu_cycle_count.load(Ordering::Relaxed);
     let mem_target = ctx.metrics.memory_target_bytes.load(Ordering::Relaxed);
     let mem_allocated = ctx.metrics.memory_allocated_bytes.load(Ordering::Relaxed);
+    let mem_cycles = ctx.metrics.memory_cycle_count.load(Ordering::Relaxed);
     let net_connections = ctx
         .metrics
         .network_active_connections
         .load(Ordering::Relaxed);
     let net_requests = ctx.metrics.network_requests_total.load(Ordering::Relaxed);
     let net_errors = ctx.metrics.network_errors_total.load(Ordering::Relaxed);
+    let net_cycles = ctx.metrics.network_cycle_count.load(Ordering::Relaxed);
     let disk_target_mbps = ctx.metrics.disk_target_mbps.load(Ordering::Relaxed);
     let disk_actual_mbps = ctx.metrics.disk_actual_mbps.load(Ordering::Relaxed);
     let disk_bytes_written = ctx.metrics.disk_bytes_written.load(Ordering::Relaxed);
     let disk_bytes_read = ctx.metrics.disk_bytes_read.load(Ordering::Relaxed);
     let disk_io_errors = ctx.metrics.disk_io_errors.load(Ordering::Relaxed);
+    let disk_cycles = ctx.metrics.disk_cycle_count.load(Ordering::Relaxed);
 
     let body = format!(
         "# HELP stressor_mode Current operation mode (0=idle, 1=cpu, 2=memory, 3=network, 4=disk)\n\
@@ -182,18 +186,24 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
          # HELP stressor_is_active Whether a stressor is currently running\n\
          # TYPE stressor_is_active gauge\n\
          stressor_is_active {}\n\
-         # HELP stressor_cpu_target_millicores Target CPU load in millicores\n\
+         # HELP stressor_cpu_target_millicores Target CPU load in millicores (dynamic ramp value)\n\
          # TYPE stressor_cpu_target_millicores gauge\n\
          stressor_cpu_target_millicores {}\n\
          # HELP stressor_cpu_active_threads Number of active CPU worker threads\n\
          # TYPE stressor_cpu_active_threads gauge\n\
          stressor_cpu_active_threads {}\n\
-         # HELP stressor_memory_target_bytes Target memory allocation in bytes\n\
+         # HELP stressor_cpu_cycle_count Number of completed CPU stress cycles\n\
+         # TYPE stressor_cpu_cycle_count gauge\n\
+         stressor_cpu_cycle_count {}\n\
+         # HELP stressor_memory_target_bytes Target memory allocation in bytes (dynamic ramp value)\n\
          # TYPE stressor_memory_target_bytes gauge\n\
          stressor_memory_target_bytes {}\n\
          # HELP stressor_memory_allocated_bytes Current memory allocation in bytes\n\
          # TYPE stressor_memory_allocated_bytes gauge\n\
          stressor_memory_allocated_bytes {}\n\
+         # HELP stressor_memory_cycle_count Number of completed memory stress cycles\n\
+         # TYPE stressor_memory_cycle_count gauge\n\
+         stressor_memory_cycle_count {}\n\
          # HELP stressor_network_active_connections Number of active network connections\n\
          # TYPE stressor_network_active_connections gauge\n\
          stressor_network_active_connections {}\n\
@@ -203,7 +213,10 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
          # HELP stressor_network_errors_total Total network errors\n\
          # TYPE stressor_network_errors_total counter\n\
          stressor_network_errors_total {}\n\
-         # HELP stressor_disk_target_mbps Target disk I/O throughput in MB/s\n\
+         # HELP stressor_network_cycle_count Number of completed network stress cycles\n\
+         # TYPE stressor_network_cycle_count gauge\n\
+         stressor_network_cycle_count {}\n\
+         # HELP stressor_disk_target_mbps Target disk I/O throughput in MB/s (dynamic ramp value)\n\
          # TYPE stressor_disk_target_mbps gauge\n\
          stressor_disk_target_mbps {}\n\
          # HELP stressor_disk_actual_mbps Actual disk I/O throughput in MB/s\n\
@@ -217,7 +230,10 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
          stressor_disk_bytes_read_total {}\n\
          # HELP stressor_disk_io_errors_total Total disk I/O errors\n\
          # TYPE stressor_disk_io_errors_total counter\n\
-         stressor_disk_io_errors_total {}\n",
+         stressor_disk_io_errors_total {}\n\
+         # HELP stressor_disk_cycle_count Number of completed disk I/O stress cycles\n\
+         # TYPE stressor_disk_cycle_count gauge\n\
+         stressor_disk_cycle_count {}\n",
         mode_num,
         s.config_version,
         if s.current_mode == OperationMode::Idle {
@@ -227,16 +243,20 @@ pub async fn get_metrics(State(ctx): State<Arc<AppContext>>) -> impl IntoRespons
         },
         cpu_target,
         cpu_threads,
+        cpu_cycles,
         mem_target,
         mem_allocated,
+        mem_cycles,
         net_connections,
         net_requests,
         net_errors,
+        net_cycles,
         disk_target_mbps,
         disk_actual_mbps,
         disk_bytes_written,
         disk_bytes_read,
         disk_io_errors,
+        disk_cycles,
     );
 
     (

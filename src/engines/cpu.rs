@@ -14,7 +14,6 @@ use crate::config::{CpuConfig, CurveMode};
 #[derive(Debug, Default)]
 pub struct CpuMetrics {
     pub target_millicores: AtomicU64,
-    pub actual_millicores: AtomicU64,
     pub active_threads: AtomicU64,
     pub cycle_count: AtomicU64,
 }

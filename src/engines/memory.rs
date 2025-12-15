@@ -51,7 +51,8 @@ impl XorShift64 {
 #[derive(Debug, Default)]
 pub struct MemoryMetrics {
     pub allocated_bytes: AtomicU64,
-    pub target_bytes: AtomicU64,
+    pub config_target_bytes: AtomicU64,
+    pub current_target_bytes: AtomicU64,
     pub cycle_count: AtomicU64,
 }
 
@@ -91,7 +92,12 @@ pub fn start_memory_stressor(config: MemoryConfig) -> MemoryHandle {
     let metrics_clone = Arc::clone(&metrics);
 
     let target_bytes = config.target_mb as u64 * 1024 * 1024;
-    metrics.target_bytes.store(target_bytes, Ordering::SeqCst);
+    metrics
+        .config_target_bytes
+        .store(target_bytes, Ordering::SeqCst);
+    metrics
+        .current_target_bytes
+        .store(target_bytes, Ordering::SeqCst);
 
     let cycle_ms = (config.midpoint_ms as u64 * 2) + (config.interval * 1000);
     tracing::info!(
@@ -172,6 +178,11 @@ fn memory_worker(config: MemoryConfig, stop: Arc<AtomicBool>, metrics: Arc<Memor
             target_bytes,
             ramp_ms,
         );
+
+        // Update current target metric (dynamic ramp position)
+        metrics
+            .current_target_bytes
+            .store(target_alloc as u64, Ordering::Relaxed);
 
         adjust_allocation(
             &mut blocks,

@@ -18,16 +18,20 @@ use crate::state::SharedState;
 pub struct OrchestratorMetrics {
     pub cpu_target_millicores: AtomicU64,
     pub cpu_active_threads: AtomicU64,
+    pub cpu_cycle_count: AtomicU64,
     pub memory_target_bytes: AtomicU64,
     pub memory_allocated_bytes: AtomicU64,
+    pub memory_cycle_count: AtomicU64,
     pub network_active_connections: AtomicU64,
     pub network_requests_total: AtomicU64,
     pub network_errors_total: AtomicU64,
+    pub network_cycle_count: AtomicU64,
     pub disk_target_mbps: AtomicU64,
     pub disk_actual_mbps: AtomicU64,
     pub disk_bytes_written: AtomicU64,
     pub disk_bytes_read: AtomicU64,
     pub disk_io_errors: AtomicU64,
+    pub disk_cycle_count: AtomicU64,
 }
 
 /// Active engine handles
@@ -158,14 +162,22 @@ impl Orchestrator {
                     handle.metrics.active_threads.load(Ordering::Relaxed),
                     Ordering::Relaxed,
                 );
+                self.metrics.cpu_cycle_count.store(
+                    handle.metrics.cycle_count.load(Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
             }
             ActiveEngine::Memory(handle) => {
                 self.metrics.memory_target_bytes.store(
-                    handle.metrics.target_bytes.load(Ordering::Relaxed),
+                    handle.metrics.current_target_bytes.load(Ordering::Relaxed),
                     Ordering::Relaxed,
                 );
                 self.metrics.memory_allocated_bytes.store(
                     handle.metrics.allocated_bytes.load(Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
+                self.metrics.memory_cycle_count.store(
+                    handle.metrics.cycle_count.load(Ordering::Relaxed),
                     Ordering::Relaxed,
                 );
             }
@@ -180,6 +192,10 @@ impl Orchestrator {
                 );
                 self.metrics.network_errors_total.store(
                     handle.metrics.errors_total.load(Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
+                self.metrics.network_cycle_count.store(
+                    handle.metrics.cycle_count.load(Ordering::Relaxed),
                     Ordering::Relaxed,
                 );
             }
@@ -204,6 +220,10 @@ impl Orchestrator {
                     handle.metrics.io_errors.load(Ordering::Relaxed),
                     Ordering::Relaxed,
                 );
+                self.metrics.disk_cycle_count.store(
+                    handle.metrics.cycle_count.load(Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
             }
             ActiveEngine::None => {}
         }
@@ -215,10 +235,12 @@ impl Orchestrator {
             .cpu_target_millicores
             .store(0, Ordering::Relaxed);
         self.metrics.cpu_active_threads.store(0, Ordering::Relaxed);
+        self.metrics.cpu_cycle_count.store(0, Ordering::Relaxed);
         self.metrics.memory_target_bytes.store(0, Ordering::Relaxed);
         self.metrics
             .memory_allocated_bytes
             .store(0, Ordering::Relaxed);
+        self.metrics.memory_cycle_count.store(0, Ordering::Relaxed);
         self.metrics
             .network_active_connections
             .store(0, Ordering::Relaxed);
@@ -228,10 +250,12 @@ impl Orchestrator {
         self.metrics
             .network_errors_total
             .store(0, Ordering::Relaxed);
+        self.metrics.network_cycle_count.store(0, Ordering::Relaxed);
         self.metrics.disk_target_mbps.store(0, Ordering::Relaxed);
         self.metrics.disk_actual_mbps.store(0, Ordering::Relaxed);
         self.metrics.disk_bytes_written.store(0, Ordering::Relaxed);
         self.metrics.disk_bytes_read.store(0, Ordering::Relaxed);
         self.metrics.disk_io_errors.store(0, Ordering::Relaxed);
+        self.metrics.disk_cycle_count.store(0, Ordering::Relaxed);
     }
 }

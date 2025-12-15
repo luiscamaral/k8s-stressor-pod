@@ -17,6 +17,8 @@ pub struct NetworkMetrics {
     pub active_connections: AtomicU64,
     pub requests_total: AtomicU64,
     pub errors_total: AtomicU64,
+    pub cycle_count: AtomicU64,
+    pub target_connections: AtomicU64,
 }
 
 /// Handle to control running network stressor
@@ -46,6 +48,11 @@ pub fn start_network_stressor(config: NetworkConfig) -> NetworkHandle {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let metrics = Arc::new(NetworkMetrics::default());
     let is_running = Arc::new(AtomicBool::new(true));
+
+    // Set target connections
+    metrics
+        .target_connections
+        .store(config.connections as u64, Ordering::Relaxed);
 
     let cycle_ms = (config.midpoint_ms as u64 * 2) + (config.interval * 1000);
     tracing::info!(
@@ -94,7 +101,6 @@ async fn network_worker(
     let endpoint = Arc::new(config.endpoint.clone());
     let active_duration = Duration::from_millis(config.midpoint_ms as u64 * 2);
     let rest_duration = Duration::from_secs(config.interval);
-    let mut cycle_count: u64 = 0;
 
     loop {
         // Check for shutdown
@@ -102,7 +108,7 @@ async fn network_worker(
             break;
         }
 
-        cycle_count += 1;
+        let cycle_count = metrics.cycle_count.fetch_add(1, Ordering::Relaxed) + 1;
         tracing::debug!("Network stressor starting cycle {}", cycle_count);
 
         // Active phase: spawn connection tasks
@@ -188,6 +194,6 @@ async fn network_worker(
         "Network stressor stopped. Total requests: {}, Errors: {}, Cycles: {}",
         metrics.requests_total.load(Ordering::Relaxed),
         metrics.errors_total.load(Ordering::Relaxed),
-        cycle_count
+        metrics.cycle_count.load(Ordering::Relaxed)
     );
 }
