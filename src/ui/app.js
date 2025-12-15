@@ -69,6 +69,7 @@ function jsonFetch(url, options) {
 
 const ui = {
   summary: null,
+  charts: null,
   editing: {
     cpu: false,
     memory: false,
@@ -78,6 +79,233 @@ const ui = {
   },
   forms: {},
 };
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function pushSample(samples, value, maxLen) {
+  samples.push(value);
+  if (samples.length > maxLen) samples.splice(0, samples.length - maxLen);
+}
+
+function padSamples(samples, maxSamples) {
+  const out = new Array(maxSamples).fill(null);
+  const take = Math.min(samples.length, maxSamples);
+  const start = maxSamples - take;
+  for (let i = 0; i < take; i += 1) {
+    out[start + i] = samples[samples.length - take + i];
+  }
+  return out;
+}
+
+function ensureCanvasSize(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width * dpr));
+  const h = Math.max(1, Math.floor(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  return { w, h, dpr };
+}
+
+function renderHistogram(canvas, samples, opts) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const { w, h, dpr } = ensureCanvasSize(canvas);
+  const padding = 10 * dpr;
+  const innerW = Math.max(1, w - padding * 2);
+  const innerH = Math.max(1, h - padding * 2);
+  const maxSamples = opts.maxSamples || 60;
+  const padded = padSamples(samples, maxSamples);
+
+  let maxValue = opts.maxValue;
+  if (maxValue == null) {
+    maxValue = 0;
+    for (const v of padded) {
+      if (v == null) continue;
+      maxValue = Math.max(maxValue, v);
+    }
+    if (maxValue <= 0) maxValue = 1;
+  }
+
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+  ctx.lineWidth = 1 * dpr;
+  for (let i = 1; i <= 3; i += 1) {
+    const y = padding + innerH * (i / 4);
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(padding + innerW, y);
+    ctx.stroke();
+  }
+
+  const barW = innerW / maxSamples;
+  const gap = 1 * dpr;
+  const fillW = Math.max(1, barW - gap);
+
+  ctx.fillStyle = opts.barColor || 'rgba(124, 92, 255, 0.85)';
+  for (let i = 0; i < maxSamples; i += 1) {
+    const v = padded[i];
+    if (v == null) continue;
+    const t = clamp(v / maxValue, 0, 1);
+    const bh = innerH * t;
+    const x = padding + i * barW;
+    const y = padding + innerH - bh;
+    ctx.fillRect(x, y, fillW, bh);
+  }
+
+  const last = samples.length > 0 ? samples[samples.length - 1] : null;
+  if (last != null) {
+    const t = clamp(last / maxValue, 0, 1);
+    const y = padding + innerH - innerH * t;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(padding + innerW, y);
+    ctx.stroke();
+  }
+}
+
+function initCharts() {
+  ui.charts = {
+    windowSize: 60,
+    cpu: {
+      canvas: byId('chartCpu'),
+      label: byId('chartCpuLabel'),
+      samples: [],
+    },
+    memory: {
+      canvas: byId('chartMemory'),
+      label: byId('chartMemoryLabel'),
+      samples: [],
+    },
+    network: {
+      canvas: byId('chartNetwork'),
+      label: byId('chartNetworkLabel'),
+      samples: [],
+      prev: null,
+    },
+    disk: {
+      canvas: byId('chartDisk'),
+      label: byId('chartDiskLabel'),
+      samples: [],
+    },
+  };
+
+  const rerender = () => {
+    if (!ui.charts) return;
+    renderHistogram(ui.charts.cpu.canvas, ui.charts.cpu.samples, {
+      maxSamples: ui.charts.windowSize,
+      maxValue: 100,
+      barColor: 'rgba(124, 92, 255, 0.85)',
+    });
+    renderHistogram(ui.charts.memory.canvas, ui.charts.memory.samples, {
+      maxSamples: ui.charts.windowSize,
+      maxValue: 100,
+      barColor: 'rgba(43, 213, 118, 0.85)',
+    });
+    renderHistogram(ui.charts.network.canvas, ui.charts.network.samples, {
+      maxSamples: ui.charts.windowSize,
+      maxValue: 100,
+      barColor: 'rgba(255, 204, 102, 0.85)',
+    });
+    renderHistogram(ui.charts.disk.canvas, ui.charts.disk.samples, {
+      maxSamples: ui.charts.windowSize,
+      maxValue: 100,
+      barColor: 'rgba(105, 180, 255, 0.85)',
+    });
+  };
+
+  window.addEventListener('resize', rerender);
+  rerender();
+}
+
+function updateCharts(summary) {
+  if (!ui.charts) return;
+
+  const windowSize = ui.charts.windowSize;
+
+  const cpuMax = Number(summary?.configs?.cpu?.max_value || 0);
+  const cpuCur = Number(summary?.metrics?.cpu_target_millicores || 0);
+  const cpuPct = cpuMax > 0 ? (cpuCur / cpuMax) * 100 : 0;
+  pushSample(ui.charts.cpu.samples, clamp(cpuPct, 0, 100), windowSize);
+  setText(ui.charts.cpu.label, `Target: ${fmtNumber(cpuCur)}m / ${fmtNumber(cpuMax)}m (${clamp(cpuPct, 0, 100).toFixed(0)}%)`);
+  renderHistogram(ui.charts.cpu.canvas, ui.charts.cpu.samples, {
+    maxSamples: windowSize,
+    maxValue: 100,
+    barColor: 'rgba(124, 92, 255, 0.85)',
+  });
+
+  const memMaxMb = Number(summary?.configs?.memory?.target_mb || 0);
+  const memMaxBytes = memMaxMb * 1024 * 1024;
+  const memAlloc = Number(summary?.metrics?.memory_allocated_bytes || 0);
+  const memCurTarget = Number(summary?.metrics?.memory_target_bytes || 0);
+  const memPct = memMaxBytes > 0 ? (memAlloc / memMaxBytes) * 100 : 0;
+  pushSample(ui.charts.memory.samples, clamp(memPct, 0, 100), windowSize);
+  setText(
+    ui.charts.memory.label,
+    `Allocated: ${fmtBytes(memAlloc)} (cur target: ${fmtBytes(memCurTarget)}, max: ${fmtNumber(memMaxMb)} MiB)`
+  );
+  renderHistogram(ui.charts.memory.canvas, ui.charts.memory.samples, {
+    maxSamples: windowSize,
+    maxValue: 100,
+    barColor: 'rgba(43, 213, 118, 0.85)',
+  });
+
+  const netTarget = Number(summary?.configs?.network?.connections || 0);
+  const netActive = Number(summary?.metrics?.network_active_connections || 0);
+  const netPct = netTarget > 0 ? (netActive / netTarget) * 100 : 0;
+  pushSample(ui.charts.network.samples, clamp(netPct, 0, 100), windowSize);
+
+  const tsMs = Number(summary?.timestamp_ms || 0);
+  const reqTotal = Number(summary?.metrics?.network_requests_total || 0);
+  const errTotal = Number(summary?.metrics?.network_errors_total || 0);
+  let reqRate = 0;
+  let errRate = 0;
+  if (ui.charts.network.prev && tsMs > ui.charts.network.prev.tsMs) {
+    const dt = (tsMs - ui.charts.network.prev.tsMs) / 1000;
+    const dtSafe = dt > 0.1 && dt < 30 ? dt : 1;
+    reqRate = (reqTotal - ui.charts.network.prev.reqTotal) / dtSafe;
+    errRate = (errTotal - ui.charts.network.prev.errTotal) / dtSafe;
+    if (reqRate < 0) reqRate = 0;
+    if (errRate < 0) errRate = 0;
+  }
+  ui.charts.network.prev = { tsMs, reqTotal, errTotal };
+
+  setText(
+    ui.charts.network.label,
+    `Active: ${fmtNumber(netActive)}/${fmtNumber(netTarget)} (${clamp(netPct, 0, 100).toFixed(0)}%), req/s: ${reqRate.toFixed(1)}, err/s: ${errRate.toFixed(1)}`
+  );
+  renderHistogram(ui.charts.network.canvas, ui.charts.network.samples, {
+    maxSamples: windowSize,
+    maxValue: 100,
+    barColor: 'rgba(255, 204, 102, 0.85)',
+  });
+
+  const diskMax = Number(summary?.configs?.disk?.target_mbps || 0);
+  const diskActual = Number(summary?.metrics?.disk_actual_mbps || 0);
+  const diskCurTarget = Number(summary?.metrics?.disk_target_mbps || 0);
+  const diskPct = diskMax > 0 ? (diskActual / diskMax) * 100 : 0;
+  pushSample(ui.charts.disk.samples, clamp(diskPct, 0, 100), windowSize);
+  setText(
+    ui.charts.disk.label,
+    `Actual: ${fmtNumber(diskActual)} MB/s (cur target: ${fmtNumber(diskCurTarget)}, max: ${fmtNumber(diskMax)})`
+  );
+  renderHistogram(ui.charts.disk.canvas, ui.charts.disk.samples, {
+    maxSamples: windowSize,
+    maxValue: 100,
+    barColor: 'rgba(105, 180, 255, 0.85)',
+  });
+}
 
 function buildMetricCards() {
   const container = byId('metricsCards');
@@ -659,6 +887,8 @@ function renderSummary(summary) {
   };
   for (const id of Object.keys(map)) setText(byId(id), map[id]);
 
+  updateCharts(summary);
+
   // Configs
   for (const key of Object.keys(ui.forms)) {
     const form = ui.forms[key];
@@ -740,6 +970,7 @@ function connectSse() {
 
 async function bootstrap() {
   buildMetricCards();
+  initCharts();
   buildConfigCards();
   initControls();
 

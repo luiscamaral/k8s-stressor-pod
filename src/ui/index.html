@@ -69,6 +69,43 @@
         </section>
 
         <section>
+          <h2 class="sectionTitle">Resource charts (last 60s)</h2>
+          <div id="chartCards" class="grid grid--2">
+            <div class="card">
+              <div class="card__header">
+                <h3 class="card__title">CPU</h3>
+                <div id="chartCpuLabel" class="muted"></div>
+              </div>
+              <canvas id="chartCpu" class="chart" role="img" aria-label="CPU chart"></canvas>
+            </div>
+
+            <div class="card">
+              <div class="card__header">
+                <h3 class="card__title">Memory</h3>
+                <div id="chartMemoryLabel" class="muted"></div>
+              </div>
+              <canvas id="chartMemory" class="chart" role="img" aria-label="Memory chart"></canvas>
+            </div>
+
+            <div class="card">
+              <div class="card__header">
+                <h3 class="card__title">Network</h3>
+                <div id="chartNetworkLabel" class="muted"></div>
+              </div>
+              <canvas id="chartNetwork" class="chart" role="img" aria-label="Network chart"></canvas>
+            </div>
+
+            <div class="card">
+              <div class="card__header">
+                <h3 class="card__title">Disk</h3>
+                <div id="chartDiskLabel" class="muted"></div>
+              </div>
+              <canvas id="chartDisk" class="chart" role="img" aria-label="Disk chart"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <section>
           <h2 class="sectionTitle">Live metrics</h2>
           <div id="metricsCards" class="grid grid--4"></div>
         </section>
