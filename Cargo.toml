@@ -10,6 +10,7 @@ description = "Deterministic resource consumption for Kubernetes reliability tes
 [dependencies]
 # Async Runtime
 tokio = { version = "1", features = ["full", "sync", "time", "rt-multi-thread"] }
+tokio-stream = "0.1"
 
 # Web Framework
 axum = "0.7"

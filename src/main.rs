@@ -107,6 +107,13 @@ async fn main() {
     // Build router with Swagger UI
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        // UI
+        .route("/ui", get(handlers::get_ui_index))
+        .route("/ui/", get(handlers::get_ui_index))
+        .route("/ui/app.js", get(handlers::get_ui_app_js))
+        .route("/ui/styles.css", get(handlers::get_ui_styles_css))
+        .route("/api/ui/summary", get(handlers::get_ui_summary))
+        .route("/api/events", get(handlers::get_ui_events))
         // Health endpoints
         .route("/health", get(handlers::health))
         .route("/ready", get(handlers::ready))
@@ -145,6 +152,7 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     tracing::info!("k8s-stressor v{} starting on {}", VERSION, addr);
     tracing::info!("Swagger UI available at http://localhost:8080/swagger-ui/");
+    tracing::info!("UI available at http://localhost:8080/ui");
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

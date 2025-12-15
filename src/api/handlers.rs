@@ -3,11 +3,23 @@
 // Created: 2024-11-28
 // License: MIT
 
+use std::convert::Infallible;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    extract::State,
+    http::{header, StatusCode},
+    response::{
+        sse::{Event, KeepAlive},
+        Html, IntoResponse, Sse,
+    },
+    Json,
+};
 use serde::Serialize;
+use tokio_stream::wrappers::IntervalStream;
+use tokio_stream::StreamExt;
 use utoipa::ToSchema;
 
 use crate::config::{ChaosConfig, CpuConfig, DiskConfig, MemoryConfig, NetworkConfig, OperationMode};
@@ -42,7 +54,147 @@ pub struct HealthResponse {
     pub version: String,
 }
 
+#[derive(Serialize)]
+pub struct UiSummaryResponse {
+    pub version: String,
+    pub timestamp_ms: u64,
+    pub status: StatusResponse,
+    pub configs: UiConfigs,
+    pub metrics: UiMetrics,
+}
+
+#[derive(Serialize)]
+pub struct UiConfigs {
+    pub cpu: CpuConfig,
+    pub memory: MemoryConfig,
+    pub network: NetworkConfig,
+    pub disk: DiskConfig,
+    pub chaos: ChaosConfig,
+}
+
+#[derive(Serialize)]
+pub struct UiMetrics {
+    pub cpu_target_millicores: u64,
+    pub cpu_active_threads: u64,
+    pub cpu_cycle_count: u64,
+    pub memory_target_bytes: u64,
+    pub memory_allocated_bytes: u64,
+    pub memory_cycle_count: u64,
+    pub network_active_connections: u64,
+    pub network_requests_total: u64,
+    pub network_errors_total: u64,
+    pub network_cycle_count: u64,
+    pub disk_target_mbps: u64,
+    pub disk_actual_mbps: u64,
+    pub disk_bytes_written_total: u64,
+    pub disk_bytes_read_total: u64,
+    pub disk_io_errors_total: u64,
+    pub disk_cycle_count: u64,
+}
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+async fn build_ui_summary(ctx: &Arc<AppContext>) -> UiSummaryResponse {
+    let s = ctx.state.read().await;
+
+    let status = StatusResponse {
+        mode: s.current_mode.clone(),
+        config_version: s.config_version,
+        is_active: s.current_mode != OperationMode::Idle,
+    };
+
+    let configs = UiConfigs {
+        cpu: s.cpu_config.clone(),
+        memory: s.memory_config.clone(),
+        network: s.network_config.clone(),
+        disk: s.disk_config.clone(),
+        chaos: s.chaos_config.clone(),
+    };
+
+    let metrics = UiMetrics {
+        cpu_target_millicores: ctx.metrics.cpu_target_millicores.load(Ordering::Relaxed),
+        cpu_active_threads: ctx.metrics.cpu_active_threads.load(Ordering::Relaxed),
+        cpu_cycle_count: ctx.metrics.cpu_cycle_count.load(Ordering::Relaxed),
+        memory_target_bytes: ctx.metrics.memory_target_bytes.load(Ordering::Relaxed),
+        memory_allocated_bytes: ctx.metrics.memory_allocated_bytes.load(Ordering::Relaxed),
+        memory_cycle_count: ctx.metrics.memory_cycle_count.load(Ordering::Relaxed),
+        network_active_connections: ctx
+            .metrics
+            .network_active_connections
+            .load(Ordering::Relaxed),
+        network_requests_total: ctx.metrics.network_requests_total.load(Ordering::Relaxed),
+        network_errors_total: ctx.metrics.network_errors_total.load(Ordering::Relaxed),
+        network_cycle_count: ctx.metrics.network_cycle_count.load(Ordering::Relaxed),
+        disk_target_mbps: ctx.metrics.disk_target_mbps.load(Ordering::Relaxed),
+        disk_actual_mbps: ctx.metrics.disk_actual_mbps.load(Ordering::Relaxed),
+        disk_bytes_written_total: ctx.metrics.disk_bytes_written.load(Ordering::Relaxed),
+        disk_bytes_read_total: ctx.metrics.disk_bytes_read.load(Ordering::Relaxed),
+        disk_io_errors_total: ctx.metrics.disk_io_errors.load(Ordering::Relaxed),
+        disk_cycle_count: ctx.metrics.disk_cycle_count.load(Ordering::Relaxed),
+    };
+
+    UiSummaryResponse {
+        version: VERSION.to_string(),
+        timestamp_ms: now_millis(),
+        status,
+        configs,
+        metrics,
+    }
+}
+
+pub async fn get_ui_index() -> impl IntoResponse {
+    Html(include_str!("../ui/index.html"))
+}
+
+pub async fn get_ui_app_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        include_str!("../ui/app.js"),
+    )
+}
+
+pub async fn get_ui_styles_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../ui/styles.css"),
+    )
+}
+
+pub async fn get_ui_summary(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let summary = build_ui_summary(&ctx).await;
+    Json(summary)
+}
+
+pub async fn get_ui_events(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let stream = IntervalStream::new(tokio::time::interval(Duration::from_secs(1))).then(
+        move |_| {
+            let ctx = Arc::clone(&ctx);
+            async move {
+                let summary = build_ui_summary(&ctx).await;
+                let payload = serde_json::to_string(&summary).unwrap_or_else(|e| {
+                    serde_json::json!({
+                        "error": format!("failed to serialize summary: {}", e)
+                    })
+                    .to_string()
+                });
+                Ok::<Event, Infallible>(Event::default().event("summary").data(payload))
+            }
+        },
+    );
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    )
+}
 
 /// Liveness probe - indicates the service is running
 /// Returns 503 if chaos.fail_liveness is enabled

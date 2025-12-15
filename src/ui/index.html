@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>k8s-stressor</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="topbar">
+        <div class="topbar__title">
+          <div class="topbar__name">k8s-stressor</div>
+          <div class="topbar__meta">
+            <span id="appVersion" class="pill pill--neutral">v?</span>
+            <span id="connStatus" class="pill pill--neutral">Connecting…</span>
+            <span id="lastUpdate" class="muted"></span>
+          </div>
+        </div>
+        <div class="topbar__links">
+          <a class="link" href="/swagger-ui/" target="_blank" rel="noreferrer">Swagger</a>
+          <a class="link" href="/metrics" target="_blank" rel="noreferrer">/metrics</a>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="grid grid--2">
+          <div class="card">
+            <div class="card__header">
+              <h2 class="card__title">Status</h2>
+            </div>
+            <div class="kv">
+              <div class="kv__row">
+                <div class="kv__key">Mode</div>
+                <div id="statusMode" class="kv__value">-</div>
+              </div>
+              <div class="kv__row">
+                <div class="kv__key">Active</div>
+                <div id="statusActive" class="kv__value">-</div>
+              </div>
+              <div class="kv__row">
+                <div class="kv__key">Config version</div>
+                <div id="statusConfigVersion" class="kv__value">-</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card__header">
+              <h2 class="card__title">Controls</h2>
+            </div>
+
+            <div class="controls">
+              <div class="controls__row">
+                <label class="label" for="modeSelect">Mode</label>
+                <select id="modeSelect" class="input">
+                  <option value="idle">idle</option>
+                  <option value="cpu-stressor">cpu-stressor</option>
+                  <option value="memory-stressor">memory-stressor</option>
+                  <option value="network-stressor">network-stressor</option>
+                  <option value="disk-stressor">disk-stressor</option>
+                </select>
+                <button id="applyModeBtn" class="btn">Apply</button>
+                <button id="stopBtn" class="btn btn--danger">Stop</button>
+              </div>
+              <div id="controlMsg" class="msg"></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="sectionTitle">Live metrics</h2>
+          <div id="metricsCards" class="grid grid--4"></div>
+        </section>
+
+        <section>
+          <h2 class="sectionTitle">Configuration</h2>
+          <div id="configCards" class="grid grid--2"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/ui/app.js" defer></script>
+  </body>
+</html>
