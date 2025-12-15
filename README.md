@@ -164,6 +164,7 @@ cargo run
 # Test endpoints
 curl http://localhost:8080/health
 curl http://localhost:8080/status
+curl http://localhost:8080/api/ui/summary
 ```
 
 ### Container (Docker/Nerdctl)
@@ -220,6 +221,9 @@ For implementation details, see [`generated/implementation-plan-version-1.md`](g
 | `GET` | `/ready` | Readiness probe |
 | `GET` | `/status` | Runtime status (mode, config_version, is_active) |
 | `GET` | `/metrics` | Prometheus-format metrics |
+| `GET` | `/ui` | Web UI dashboard |
+| `GET` | `/api/ui/summary` | UI summary snapshot (JSON) |
+| `GET` | `/api/events` | UI event stream (SSE) |
 | `GET` | `/mode` | Get current operation mode |
 | `PUT` | `/mode` | Set operation mode |
 | `GET` | `/config/cpu` | Get CPU configuration |
